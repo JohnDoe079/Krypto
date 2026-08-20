@@ -1,6 +1,7 @@
 """Generuje raport DOCX z wynikow analizy raportow gieldowych."""
 
 import os
+import re
 from datetime import datetime
 from typing import Dict, List
 from docx import Document
@@ -10,7 +11,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 
-from models.schemas import ExtractedIdentifiers
+from models.schemas import ExtractedIdentifiers, AssetTransaction
 from matcher import ReportComparator
 
 SECTION_TRANSLATIONS = {
@@ -33,6 +34,30 @@ BASIC_INFO_ORDER = [
 ]
 
 PAGE_WIDTH_INCHES = 7.0
+
+
+def _to_float(val: str) -> float:
+    try:
+        return float(str(val).replace(",", "").replace(" ", ""))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _sum_asset_flow(transactions: List[AssetTransaction]) -> Dict[str, Dict[str, float]]:
+    """Podsumowanie przeplywow per waluta: przychody, rozchody, netto."""
+    result = {}
+    for t in transactions:
+        curr = t.currency.upper() if t.currency else "UNKNOWN"
+        if curr not in result:
+            result[curr] = {"in": 0.0, "out": 0.0, "count_in": 0, "count_out": 0}
+        chg = _to_float(t.change)
+        if chg > 0:
+            result[curr]["in"] += chg
+            result[curr]["count_in"] += 1
+        elif chg < 0:
+            result[curr]["out"] += abs(chg)
+            result[curr]["count_out"] += 1
+    return result
 
 
 class ReportGenerator:
@@ -204,7 +229,6 @@ class ReportGenerator:
         if r.estimate_total_btc:
             self._add_paragraph(f"Estimate Total Balance (BTC): {r.estimate_total_btc}", bold=True)
         if r.asset_balances:
-            # Kompaktowa tabela: 4 kolumny
             bal_rows = []
             for b in r.asset_balances:
                 waluta = b.currency_code
@@ -222,41 +246,60 @@ class ReportGenerator:
         else:
             self._add_paragraph("Brak danych o saldach walut (wszystkie salda to 0 lub arkusz nie zawiera tabeli).")
 
-    def _render_spot_asset_log(self, r: ExtractedIdentifiers):
-        if not r.spot_transactions:
+    def _render_asset_log(self, r: ExtractedIdentifiers, transactions: List[AssetTransaction], title: str, sheet_name: str):
+        if not transactions:
             return
-        self._add_heading("Spot Asset Log (Historia ruchow Spot)", level=3)
-        self._add_time_range_for_sheet(r, "Spot Asset Log")
-        self._add_paragraph(f"Liczba transakcji Spot: {len(r.spot_transactions)}")
-        txn_rows = []
-        for t in r.spot_transactions[:50]:
-            txn_rows.append([
-                t.time, t.currency, t.amount, t.change,
-                t.locked, t.freeze, t.processing, t.reason,
-            ])
-        self._add_table(
-            ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
-            txn_rows, max_rows=50)
-        if len(r.spot_transactions) > 50:
-            self._add_paragraph(f"... oraz {len(r.spot_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
+        self._add_heading(title, level=3)
+        self._add_time_range_for_sheet(r, sheet_name)
 
-    def _render_funding_asset_log(self, r: ExtractedIdentifiers):
-        if not r.funding_transactions:
-            return
-        self._add_heading("Funding Asset Log (Historia ruchow Funding)", level=3)
-        self._add_time_range_for_sheet(r, "Funding Asset Log")
-        self._add_paragraph(f"Liczba transakcji Funding: {len(r.funding_transactions)}")
+        # Notka informacyjna
+        self._add_paragraph(
+            "Uwaga: Ponizszy log pokazuje ruchy srodkow (wpłaty, wypłaty, transfery, rozliczenia). "
+            "Szczegoly kupna/sprzedazy (cena, kontrahent) znajduja sie w arkuszu 'Order History'. "
+            "Szczegoly wpłat/wypłat (adresy, TXID) znajduja sie w 'Deposit/Withdrawal History'.",
+            color=RGBColor(0x60, 0x60, 0x60))
+
+        # Podsumowanie per waluta
+        flow = _sum_asset_flow(transactions)
+        if flow:
+            self._add_paragraph("Podsumowanie przeplywow per waluta:", bold=True)
+            flow_rows = []
+            for curr, data in sorted(flow.items()):
+                netto = data["in"] - data["out"]
+                flow_rows.append([
+                    curr,
+                    f"+{data['in']:.8f}".rstrip("0").rstrip("."),
+                    f"-{data['out']:.8f}".rstrip("0").rstrip("."),
+                    f"{netto:+.8f}".rstrip("0").rstrip("."),
+                    str(data["count_in"]),
+                    str(data["count_out"]),
+                ])
+            self._add_table(
+                ["Waluta", "Przychody", "Rozchody", "Netto", "L. przych.", "L. rozch."],
+                flow_rows, max_rows=50)
+
+        # Szczegoly transakcji — kompaktowa tabela
+        self._add_paragraph(f"Szczegoly transakcji ({len(transactions)} lacznie):", bold=True)
         txn_rows = []
-        for t in r.funding_transactions[:50]:
+        for t in transactions[:30]:
+            # Kolorujemy zmiane: + na zielono, - na czerwono — w DOCX nie mozemy kolorowac komorek latwo,
+            # wiec dodajemy strzalke
+            chg = _to_float(t.change)
+            chg_str = t.change
+            if chg > 0:
+                chg_str = f"+{t.change}"
             txn_rows.append([
-                t.time, t.currency, t.amount, t.change,
-                t.locked, t.freeze, t.processing, t.reason,
+                t.time[:19] if t.time else "",  # skracamy czas
+                t.currency,
+                chg_str,
+                t.reason if t.reason else "—",
+                t.transaction_id[:20] if t.transaction_id else "—",
             ])
         self._add_table(
-            ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
-            txn_rows, max_rows=50)
-        if len(r.funding_transactions) > 50:
-            self._add_paragraph(f"... oraz {len(r.funding_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
+            ["Czas", "Waluta", "Zmiana", "Powod", "TxID"],
+            txn_rows, max_rows=30)
+        if len(transactions) > 30:
+            self._add_paragraph(f"... oraz {len(transactions) - 30} kolejnych transakcji (pelna lista w JSON).")
 
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
         # ===== STRONA TYTULOWA =====
@@ -335,7 +378,7 @@ class ReportGenerator:
                     f"Nieznane arkusze: {', '.join(r.unknown_sheets)}",
                     color=RGBColor(0xC0, 0x00, 0x00))
 
-            # GLOBALNY ZAKRES CZASOWY KONTA — przed pierwszym arkuszem
+            # GLOBALNY ZAKRES CZASOWY KONTA
             all_from = []
             all_to = []
             for tr in r.time_ranges.values():
@@ -356,9 +399,11 @@ class ReportGenerator:
                 elif sheet_name == "Assets Overview":
                     self._render_assets_overview(r)
                 elif sheet_name == "Spot Asset Log":
-                    self._render_spot_asset_log(r)
+                    self._render_asset_log(r, r.spot_transactions,
+                        "Spot Asset Log (Historia ruchow Spot)", "Spot Asset Log")
                 elif sheet_name == "Funding Asset Log":
-                    self._render_funding_asset_log(r)
+                    self._render_asset_log(r, r.funding_transactions,
+                        "Funding Asset Log (Historia ruchow Funding)", "Funding Asset Log")
                 # Inne arkusze beda dodawane pozniej
 
             self.doc.add_page_break()

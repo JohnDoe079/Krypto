@@ -154,7 +154,9 @@ class BinanceReportParser:
                         if ni < len(df) and nj < len(df.columns):
                             btc_val = clean_val(df.iloc[ni, nj])
                             if btc_val and not _is_zero(btc_val):
-                                self.identifiers.estimate_total_btc = _fmt_num(btc_val)
+                                # Usun newline przed ≈ jezeli wystepuje
+                                btc_str = _fmt_num(btc_val).replace("\n", " ").replace("\r", " ").strip()
+                                self.identifiers.estimate_total_btc = btc_str
                                 print(f"    Estimate Total Balance(BTC): {self.identifiers.estimate_total_btc}")
                                 break
 
@@ -274,6 +276,8 @@ class BinanceReportParser:
                 col_map["change"] = idx
             elif "reason" in c or "type" in c or "operation" in c:
                 col_map["reason"] = idx
+            elif "transaction id" in c or "txid" in c or "tx id" in c:
+                col_map["transaction_id"] = idx
 
         for _, row in df.iterrows():
             txn = AssetTransaction(
@@ -285,6 +289,7 @@ class BinanceReportParser:
                 processing=_fmt_num(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
                 change=_fmt_num(clean_val(row.iloc[col_map.get("change", 0)])) if "change" in col_map else "",
                 reason=str(clean_val(row.iloc[col_map.get("reason", 0)])) if "reason" in col_map else "",
+                transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
                 wallet_type=wallet_type,
             )
             if txn.time or txn.currency:

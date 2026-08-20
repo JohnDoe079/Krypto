@@ -44,6 +44,7 @@ class AssetTransaction:
     processing: str = ""
     change: str = ""
     reason: str = ""
+    transaction_id: str = ""
     wallet_type: str = ""  # Spot lub Funding
 
     def to_dict(self) -> dict:
@@ -56,6 +57,7 @@ class AssetTransaction:
             "processing": self.processing,
             "change": self.change,
             "reason": self.reason,
+            "transaction_id": self.transaction_id,
             "wallet_type": self.wallet_type,
         }
 
