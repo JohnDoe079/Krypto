@@ -1,4 +1,4 @@
-"""Generuje raport DOCX z wyników analizy raportów giełdowych."""
+"""Generuje raport DOCX z wynikow analizy raportow gieldowych."""
 
 import os
 from datetime import datetime
@@ -13,7 +13,7 @@ from docx.oxml import parse_xml
 from models.schemas import ExtractedIdentifiers
 from matcher import ReportComparator
 
-# Tłumaczenia sekcji Customer Information
+# Tlumaczenia sekcji Customer Information
 SECTION_TRANSLATIONS = {
     "Basic Information": "Basic Information (Podstawowe informacje)",
     "API Information": "API Information (Informacje API)",
@@ -25,7 +25,7 @@ SECTION_TRANSLATIONS = {
     "Sub-accounts": "Sub-accounts (Subkonta)",
 }
 
-# Kolejność wierszy w Basic Information
+# Kolejnosc wierszy w Basic Information
 BASIC_INFO_ORDER = [
     "Registration time", "User ID", "User authentication type",
     "User authentication time", "User nationality", "User ID number",
@@ -95,7 +95,7 @@ class ReportGenerator:
         for i in range(n_cols):
             table.columns[i].width = col_width
 
-        # Nagłówki
+        # Naglowki
         hdr_cells = table.rows[0].cells
         for i, h in enumerate(headers):
             hdr_cells[i].text = h
@@ -105,7 +105,6 @@ class ReportGenerator:
                     run.font.size = Pt(10)
                     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            # Tło nagłówka — ciemny granat
             shading_elm = parse_xml(r'<w:shd {} w:fill="1F4E78"/>'.format(nsdecls('w')))
             hdr_cells[i]._tc.get_or_add_tcPr().append(shading_elm)
 
@@ -120,7 +119,7 @@ class ReportGenerator:
                         run.font.size = Pt(9)
 
         if len(rows) > max_rows:
-            self._add_paragraph(f" ... i {len(rows) - max_rows} więcej wierszy")
+            self._add_paragraph(f" ... i {len(rows) - max_rows} wiecej wierszy")
         return table
 
     def _sort_basic_info(self, data: Dict[str, str]) -> List[List[str]]:
@@ -141,7 +140,7 @@ class ReportGenerator:
         return rows
 
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
-        # ===== STRONA TYTUŁOWA =====
+        # ===== STRONA TYTULOWA =====
         self.doc.add_paragraph()
         self.doc.add_paragraph()
         title = self.doc.add_paragraph()
@@ -153,7 +152,7 @@ class ReportGenerator:
 
         subtitle = self.doc.add_paragraph()
         subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run2 = subtitle.add_run("Raportów giełdowych kryptowalutowych")
+        run2 = subtitle.add_run("Raportow gieldowych kryptowalutowych")
         run2.font.size = Pt(18)
 
         self.doc.add_paragraph()
@@ -163,17 +162,17 @@ class ReportGenerator:
 
         self.doc.add_page_break()
 
-        # ===== SPIS TREŚCI =====
-        self._add_heading("Spis treści", level=1)
+        # ===== SPIS TRESCI =====
+        self._add_heading("Spis tresci", level=1)
         toc_items = [
             "1. Podsumowanie",
-            "2. Szczegółowa analiza poszczególnych plików",
+            "2. Szczegolowa analiza poszczegolnych plikow",
         ]
         for i, r in enumerate(reports, 1):
             toc_items.append(f"  2.{i}. {r.source_file}")
         if len(reports) >= 2:
-            toc_items.append("3. Porównanie między raportami")
-        toc_items.append("4. Pełna lista identyfikatorów")
+            toc_items.append("3. Porownanie miedzy raportami")
+        toc_items.append("4. Pelna lista identyfikatorow")
 
         for item in toc_items:
             self.doc.add_paragraph(item, style='List Bullet')
@@ -182,12 +181,11 @@ class ReportGenerator:
 
         # ===== 1. PODSUMOWANIE =====
         self._add_heading("1. Podsumowanie", level=1)
-        self._add_paragraph(f"Liczba przeanalizowanych plików: {len(reports)}")
-        self._add_paragraph(f"Liczba giełd: {len(set(file_map.values()))}")
+        self._add_paragraph(f"Liczba przeanalizowanych plikow: {len(reports)}")
+        self._add_paragraph(f"Liczba gield: {len(set(file_map.values()))}")
 
         summary_rows = []
         for r in reports:
-            # Główny zakres czasowy (najszerszy z wszystkich arkuszy)
             all_from = []
             all_to = []
             for tr in r.time_ranges.values():
@@ -207,23 +205,25 @@ class ReportGenerator:
                 str(len(r.ips)),
                 str(len(r.wallet_addresses)),
                 str(len(r.txids)),
+                r.estimate_total_btc if r.estimate_total_btc else "(brak)",
+                str(len(r.asset_balances)),
                 time_summary,
             ])
 
         self._add_table(
-            ["Plik", "Giełda", "Arkusze", "ID właściciela", "ID powiązanych",
-             "E-maile", "IP", "Portfele", "TXID", "Zakres czasowy"],
+            ["Plik", "Gielda", "Arkusze", "ID wlasciciela", "ID powiazanych",
+             "E-maile", "IP", "Portfele", "TXID", "Est. Total BTC", "Salda", "Zakres czasowy"],
             summary_rows
         )
 
         self.doc.add_page_break()
 
-        # ===== 2. SZCZEGÓŁY KAŻDEGO PLIKU =====
-        self._add_heading("2. Szczegółowa analiza poszczególnych plików", level=1)
+        # ===== 2. SZCZEGOLY KAZDEGO PLIKU =====
+        self._add_heading("2. Szczegolowa analiza poszczegolnych plikow", level=1)
 
         for idx, r in enumerate(reports, 1):
             self._add_heading(f"2.{idx}. {r.source_file}", level=2)
-            self._add_paragraph(f"Giełda: {r.exchange.upper()}")
+            self._add_paragraph(f"Gielda: {r.exchange.upper()}")
             self._add_paragraph(
                 f"Przeanalizowane arkusze ({len(r.parsed_sheets)}): {', '.join(r.parsed_sheets)}")
             if r.unknown_sheets:
@@ -239,9 +239,77 @@ class ReportGenerator:
                     time_rows.append([sheet_name, tr.get("from", ""), tr.get("to", "")])
                 self._add_table(["Arkusz", "Od", "Do"], time_rows, max_rows=50)
 
+            # --- ASSETS OVERVIEW ---
+            if "Assets Overview" in r.parsed_sheets:
+                self._add_heading("Assets Overview (Przeglad aktywow)", level=3)
+                if r.estimate_total_btc:
+                    self._add_paragraph(
+                        f"Estimate Total Balance (BTC): {r.estimate_total_btc}", bold=True)
+                if r.asset_balances:
+                    bal_rows = []
+                    for b in r.asset_balances:
+                        bal_rows.append([
+                            b.currency_code,
+                            b.currency_name,
+                            b.all_positions,
+                            b.available_positions,
+                            b.btc_equivalent,
+                            b.usdt_equivalent,
+                            b.wallet_type,
+                        ])
+                    self._add_table(
+                        ["Kod", "Nazwa", "Wszystkie", "Dostepne", "BTC Eq.", "USDT Eq.", "Portfel"],
+                        bal_rows, max_rows=100)
+                else:
+                    self._add_paragraph("Brak danych o saldach walut.")
+
+            # --- SPOT ASSET LOG ---
+            if r.spot_transactions:
+                self._add_heading("Spot Asset Log (Historia ruchow Spot)", level=3)
+                self._add_paragraph(f"Liczba transakcji Spot: {len(r.spot_transactions)}")
+                txn_rows = []
+                for t in r.spot_transactions[:50]:  # max 50 w raporcie
+                    txn_rows.append([
+                        t.time,
+                        t.currency,
+                        t.amount,
+                        t.change,
+                        t.locked,
+                        t.freeze,
+                        t.processing,
+                        t.reason,
+                    ])
+                self._add_table(
+                    ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
+                    txn_rows, max_rows=50)
+                if len(r.spot_transactions) > 50:
+                    self._add_paragraph(f"... oraz {len(r.spot_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
+
+            # --- FUNDING ASSET LOG ---
+            if r.funding_transactions:
+                self._add_heading("Funding Asset Log (Historia ruchow Funding)", level=3)
+                self._add_paragraph(f"Liczba transakcji Funding: {len(r.funding_transactions)}")
+                txn_rows = []
+                for t in r.funding_transactions[:50]:
+                    txn_rows.append([
+                        t.time,
+                        t.currency,
+                        t.amount,
+                        t.change,
+                        t.locked,
+                        t.freeze,
+                        t.processing,
+                        t.reason,
+                    ])
+                self._add_table(
+                    ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
+                    txn_rows, max_rows=50)
+                if len(r.funding_transactions) > 50:
+                    self._add_paragraph(f"... oraz {len(r.funding_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
+
             # --- CUSTOMER INFORMATION ---
             if r.customer_info_sections:
-                self._add_heading("Customer Information (Informacje o użytkowniku)", level=3)
+                self._add_heading("Customer Information (Informacje o uzytkowniku)", level=3)
                 for sec_name, data in r.customer_info_sections.items():
                     if not data:
                         continue
@@ -257,7 +325,7 @@ class ReportGenerator:
                                 rows.append([str(col), str(val)])
                             else:
                                 rows.append([str(col), "(puste)"])
-                    self._add_table(["Pole", "Wartość"], rows, max_rows=100)
+                    self._add_table(["Pole", "Wartosc"], rows, max_rows=100)
 
             # --- KYC DOCUMENTS ---
             if "KYC Documents" in r.parsed_sheets:
@@ -286,31 +354,31 @@ class ReportGenerator:
                                 run = p.add_run()
                                 run.add_picture(img_path, width=Inches(2.8))
                             except Exception as e:
-                                cell.text = f"[!] Błąd: {e}"
+                                cell.text = f"[!] Blad: {e}"
                         else:
                             cell.text = "Brak pliku"
                 else:
-                    self._add_paragraph("Brak osadzonych obrazków w arkuszu KYC Documents.")
+                    self._add_paragraph("Brak osadzonych obrazkow w arkuszu KYC Documents.")
 
             self.doc.add_page_break()
 
-        # ===== 3. PORÓWNANIE =====
+        # ===== 3. POROWNANIE =====
         if len(reports) >= 2:
-            self._add_heading("3. Porównanie między raportami", level=1)
+            self._add_heading("3. Porownanie miedzy raportami", level=1)
             comp = ReportComparator(reports)
             result = comp.compare()
 
             common = result.get("common", {})
             if common:
-                self._add_heading("Wspólne identyfikatory (potencjalne powiązania):", level=2)
+                self._add_heading("Wspolne identyfikatory (potencjalne powiazania):", level=2)
                 self._add_paragraph(
-                    "Poniższe identyfikatory występują w co najmniej dwóch raportach. "
-                    "Mogą wskazywać na powiązanie między kontami.",
+                    "Ponizsze identyfikatory wystepuja w co najmniej dwoch raportach. "
+                    "Moga wskazywac na powiazanie miedzy kontami.",
                     color=RGBColor(0xC0, 0x00, 0x00)
                 )
 
                 for field_name, entries in common.items():
-                    self._add_heading(f"[{field_name}] — {len(entries)} wspólnych", level=3)
+                    self._add_heading(f"[{field_name}] — {len(entries)} wspolnych", level=3)
                     rows = []
                     for i, e in enumerate(entries):
                         files_str = ", ".join(e["files"])
@@ -324,37 +392,35 @@ class ReportGenerator:
                                     parts.append(f"{file_short}: {ranges[0]}")
                             time_str = "; ".join(parts)
                         rows.append([str(i+1), str(e["value"]), files_str, time_str])
-                    self._add_table(["Lp.", "Wartość", "Pliki", "Zakres czasowy"], rows, max_rows=30)
+                    self._add_table(["Lp.", "Wartosc", "Pliki", "Zakres czasowy"], rows, max_rows=30)
             else:
-                self._add_paragraph("Nie znaleziono wspólnych identyfikatorów między raportami.")
+                self._add_paragraph("Nie znaleziono wspolnych identyfikatorow miedzy raportami.")
 
             self.doc.add_page_break()
 
-        # ===== 4. PEŁNA LISTA IDENTYFIKATORÓW =====
-        self._add_heading("4. Pełna lista identyfikatorów", level=1)
+        # ===== 4. PELNA LISTA IDENTYFIKATOROW =====
+        self._add_heading("4. Pelna lista identyfikatorow", level=1)
         self._add_paragraph(
-            "Szczegółowe dane w formacie JSON zostały zapisane w pliku parsed_report.json.")
+            "Szczegolowe dane w formacie JSON zostaly zapisane w pliku parsed_report.json.")
 
         for r in reports:
             self._add_heading(f"{r.source_file}", level=2)
 
-            # ID właściciela (z Customer Information)
             if r.user_ids:
-                self._add_paragraph(f"ID właściciela konta ({len(r.user_ids)}):", bold=True)
+                self._add_paragraph(f"ID wlasciciela konta ({len(r.user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.user_ids))]
-                self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
+                self._add_table(["Lp.", "Wartosc"], rows, max_rows=20)
 
-            # ID powiązanych użytkowników
             if r.related_user_ids:
                 self._add_paragraph(
-                    f"ID powiązanych użytkowników (z P2P, Pay, itp.) ({len(r.related_user_ids)}):",
+                    f"ID powiazanych uzytkownikow (z P2P, Pay, itp.) ({len(r.related_user_ids)}):",
                     bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.related_user_ids))]
-                self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
+                self._add_table(["Lp.", "Wartosc"], rows, max_rows=20)
 
             id_sections = [
                 ("E-maile", r.emails),
-                ("Numery telefonów", r.phones),
+                ("Numery telefonow", r.phones),
                 ("Adresy IP", r.ips),
                 ("Adresy portfeli (krypto)", r.wallet_addresses),
                 ("TXID (hash transakcji)", r.txids),
@@ -362,23 +428,23 @@ class ReportGenerator:
                 ("Ostatnie 4 cyfry karty", r.card_last4),
                 ("IBAN", r.ibans),
                 ("Numery kont", r.account_numbers),
-                ("ID urządzeń", r.device_ids),
+                ("ID urzadzen", r.device_ids),
                 ("ID Fvideo", r.fvideo_ids),
                 ("UUID BNC", r.bnc_uuids),
-                ("ID zamówień", r.order_ids),
-                ("ID kontrahentów", r.counterparty_ids),
+                ("ID zamowien", r.order_ids),
+                ("ID kontrahentow", r.counterparty_ids),
                 ("ID transakcji", r.transaction_ids),
                 ("Imiona i nazwiska", r.names),
-                ("Narodowości", r.nationalities),
-                ("Numery dokumentów tożsamości", r.id_numbers),
+                ("Narodowosci", r.nationalities),
+                ("Numery dokumentow tozsamosci", r.id_numbers),
                 ("Lokalizacje GEO", r.geolocations),
-                ("Przeglądarki / User Agent", r.browsers),
+                ("Przegladarki / User Agent", r.browsers),
             ]
 
             for title, items in id_sections:
                 if items:
                     self._add_paragraph(f"{title} ({len(items)}):", bold=True)
                     rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(items))]
-                    self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
+                    self._add_table(["Lp.", "Wartosc"], rows, max_rows=20)
 
         self.doc.save(self.output_path)

@@ -1,4 +1,4 @@
-"""Parser raportów użytkownika Binance w formacie .xlsx."""
+"""Parser raportow uzytkownika Binance w formacie .xlsx."""
 
 import pandas as pd
 import re
@@ -8,6 +8,8 @@ from openpyxl import load_workbook
 
 from models.schemas import (
     ExtractedIdentifiers,
+    AssetBalance,
+    AssetTransaction,
     clean_val,
     is_valid_ip,
     is_wallet_address,
@@ -36,18 +38,16 @@ class BinanceReportParser:
             try:
                 self._parse_sheet(sheet_name)
             except Exception as e:
-                print(f"  [!] Błąd w arkuszu '{sheet_name}': {e}")
+                print(f"  [!] Blad w arkuszu '{sheet_name}': {e}")
 
         if self.identifiers.unknown_sheets:
             print(f"  [!] Nieznane arkusze (sparsowane generycznie): {', '.join(self.identifiers.unknown_sheets)}")
 
-        # Dedup telefonów: Mobile ma kierunkowy (+380...), SMS bez kierunkowego
         self._dedup_phones()
-
         return self.identifiers
 
     def _dedup_phones(self):
-        """Jeżeli SMS jest podzbiorem Mobile (bez kierunkowego), usuń duplikat."""
+        """Jezeli SMS jest podzbiorem Mobile (bez kierunkowego), usun duplikat."""
         phones = sorted(self.identifiers.phones)
         to_remove = set()
         for p1 in phones:
@@ -63,7 +63,7 @@ class BinanceReportParser:
         self.identifiers.phones -= to_remove
 
     def _add_time_range(self, df: pd.DataFrame, sheet_name: str):
-        """Zapisuje zakres czasowy arkusza jeżeli znajdzie kolumny czasowe."""
+        """Zapisuje zakres czasowy arkusza jezeli znajdzie kolumny czasowe."""
         tr = extract_time_range(df)
         if tr:
             self.identifiers.time_ranges[sheet_name] = tr
@@ -84,6 +84,12 @@ class BinanceReportParser:
             self._parse_kyc_documents(df)
             self._add_time_range(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
+        elif sheet_name == "Assets Overview":
+            df = pd.read_excel(
+                self.file_path, sheet_name=sheet_name, header=None, engine="openpyxl"
+            )
+            self._parse_assets_overview(df)
+            self.identifiers.parsed_sheets.append(sheet_name)
         else:
             df = pd.read_excel(
                 self.file_path, sheet_name=sheet_name, header=0, engine="openpyxl"
@@ -102,6 +108,169 @@ class BinanceReportParser:
                 self.identifiers.unknown_sheets.append(sheet_name)
                 self.identifiers.parsed_sheets.append(sheet_name)
 
+    # ============================================================
+    # ASSETS OVERVIEW
+    # ============================================================
+    def _parse_assets_overview(self, df: pd.DataFrame):
+        """Parsuje Assets Overview — salda per waluta + Estimate Total Balance."""
+        # Szukamy Estimate Total Balance(BTC) w pierwszych wierszach
+        for i in range(min(10, len(df))):
+            for j in range(len(df.columns)):
+                val = clean_val(df.iloc[i, j])
+                if val and "estimate total balance" in str(val).lower():
+                    # Nastepna komorka w prawo lub w dol to wartosc
+                    for di, dj in [(0, 1), (1, 0), (1, 1)]:
+                        ni, nj = i + di, j + dj
+                        if ni < len(df) and nj < len(df.columns):
+                            btc_val = clean_val(df.iloc[ni, nj])
+                            if btc_val:
+                                self.identifiers.estimate_total_btc = str(btc_val)
+                                print(f"    Estimate Total Balance(BTC): {btc_val}")
+                                break
+
+        # Szukamy tabel z saldami — naglowki zawieraja "Currency Name" lub "Currency Code"
+        current_wallet = "Spot"  # domyslnie Spot, potem moze byc inny
+        i = 0
+        while i < len(df):
+            row = df.iloc[i]
+            row_vals = [str(v).strip().lower() if pd.notna(v) else "" for v in row.values]
+
+            # Wykryj nazwe sekcji/portfela
+            if any("spot" in v for v in row_vals):
+                current_wallet = "Spot"
+            elif any("futures" in v for v in row_vals):
+                current_wallet = "Futures"
+            elif any("earn" in v for v in row_vals):
+                current_wallet = "Earn"
+            elif any("margin" in v for v in row_vals):
+                current_wallet = "Margin"
+            elif any("pool" in v for v in row_vals):
+                current_wallet = "Pool"
+            elif any("funding" in v for v in row_vals):
+                current_wallet = "Funding"
+
+            # Wykryj naglowek tabeli
+            if "currency name" in row_vals or "currency code" in row_vals:
+                # Znajdz indeksy kolumn
+                headers = [clean_val(v) for v in row.values]
+                col_map = {}
+                for idx_h, h in enumerate(headers):
+                    if h:
+                        h_lower = str(h).lower().strip()
+                        if "currency name" in h_lower:
+                            col_map["currency_name"] = idx_h
+                        elif "currency code" in h_lower or "code" in h_lower:
+                            col_map["currency_code"] = idx_h
+                        elif "all positions" in h_lower or "all" in h_lower:
+                            col_map["all_positions"] = idx_h
+                        elif "available" in h_lower:
+                            col_map["available_positions"] = idx_h
+                        elif "withdrawal" in h_lower or "in withdrawal" in h_lower:
+                            col_map["in_withdrawal"] = idx_h
+                        elif "pending" in h_lower:
+                            col_map["pending_order"] = idx_h
+                        elif "btc equivalent" in h_lower or "btc" in h_lower:
+                            col_map["btc_equivalent"] = idx_h
+                        elif "usdt equivalent" in h_lower or "usdt" in h_lower:
+                            col_map["usdt_equivalent"] = idx_h
+
+                if "currency_code" in col_map:
+                    # Czytamy wiersze az do pustego
+                    i += 1
+                    while i < len(df):
+                        row_data = df.iloc[i]
+                        code_val = clean_val(row_data.iloc[col_map.get("currency_code", 0)])
+                        if not code_val:
+                            break
+                        bal = AssetBalance(
+                            currency_name=str(clean_val(row_data.iloc[col_map.get("currency_name", 0)])) if "currency_name" in col_map else "",
+                            currency_code=str(code_val),
+                            all_positions=str(clean_val(row_data.iloc[col_map.get("all_positions", 0)])) if "all_positions" in col_map else "",
+                            available_positions=str(clean_val(row_data.iloc[col_map.get("available_positions", 0)])) if "available_positions" in col_map else "",
+                            in_withdrawal=str(clean_val(row_data.iloc[col_map.get("in_withdrawal", 0)])) if "in_withdrawal" in col_map else "",
+                            pending_order=str(clean_val(row_data.iloc[col_map.get("pending_order", 0)])) if "pending_order" in col_map else "",
+                            btc_equivalent=str(clean_val(row_data.iloc[col_map.get("btc_equivalent", 0)])) if "btc_equivalent" in col_map else "",
+                            usdt_equivalent=str(clean_val(row_data.iloc[col_map.get("usdt_equivalent", 0)])) if "usdt_equivalent" in col_map else "",
+                            wallet_type=current_wallet,
+                        )
+                        self.identifiers.asset_balances.append(bal)
+                        i += 1
+                    continue
+            i += 1
+
+        print(f"    Sparsowano {len(self.identifiers.asset_balances)} sald walut")
+
+    # ============================================================
+    # SPOT ASSET LOG
+    # ============================================================
+    def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
+        self._parse_asset_log(df, "Spot")
+
+    # ============================================================
+    # FUNDING ASSET LOG
+    # ============================================================
+    def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
+        self._parse_asset_log(df, "Funding")
+
+    def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str):
+        """Parsuje Spot/Funding Asset Log — kazdy wiersz to transakcja."""
+        # Znajdz mapowanie kolumn
+        cols = [str(c).strip().lower() for c in df.columns]
+        col_map = {}
+        for idx, c in enumerate(cols):
+            if "time" in c or "date" in c:
+                col_map["time"] = idx
+            elif c == "currency" or "asset" in c:
+                col_map["currency"] = idx
+            elif "amount" in c and "change" not in c:
+                col_map["amount"] = idx
+            elif "locked" in c:
+                col_map["locked"] = idx
+            elif "freeze" in c:
+                col_map["freeze"] = idx
+            elif "processing" in c:
+                col_map["processing"] = idx
+            elif "change" in c:
+                col_map["change"] = idx
+            elif "reason" in c or "type" in c or "operation" in c:
+                col_map["reason"] = idx
+
+        for _, row in df.iterrows():
+            txn = AssetTransaction(
+                time=str(clean_val(row.iloc[col_map.get("time", 0)])) if "time" in col_map else "",
+                currency=str(clean_val(row.iloc[col_map.get("currency", 0)])) if "currency" in col_map else "",
+                amount=str(clean_val(row.iloc[col_map.get("amount", 0)])) if "amount" in col_map else "",
+                locked=str(clean_val(row.iloc[col_map.get("locked", 0)])) if "locked" in col_map else "",
+                freeze=str(clean_val(row.iloc[col_map.get("freeze", 0)])) if "freeze" in col_map else "",
+                processing=str(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
+                change=str(clean_val(row.iloc[col_map.get("change", 0)])) if "change" in col_map else "",
+                reason=str(clean_val(row.iloc[col_map.get("reason", 0)])) if "reason" in col_map else "",
+                wallet_type=wallet_type,
+            )
+            if txn.time or txn.currency:
+                if wallet_type == "Spot":
+                    self.identifiers.spot_transactions.append(txn)
+                else:
+                    self.identifiers.funding_transactions.append(txn)
+
+        count = len(self.identifiers.spot_transactions) if wallet_type == "Spot" else len(self.identifiers.funding_transactions)
+        print(f"    Sparsowano {count} transakcji {wallet_type}")
+
+        # Ekstrakcja ID z Asset Log (User ID, Transaction ID)
+        if "Transaction ID" in df.columns:
+            for v in df["Transaction ID"].dropna():
+                v = clean_val(v)
+                if v:
+                    self.identifiers.transaction_ids.add(v)
+        if "User ID" in df.columns:
+            for v in df["User ID"].dropna():
+                v = clean_val(v)
+                if v:
+                    self.identifiers.related_user_ids.add(str(v))
+
+    # ============================================================
+    # CUSTOMER INFORMATION
+    # ============================================================
     def _parse_customer_info_raw(self, df: pd.DataFrame):
         sections = {}
         current_section = None
@@ -159,7 +328,6 @@ class BinanceReportParser:
                     self.identifiers.ips.add(v)
                     continue
 
-                # User ID z Customer Information = właściciel konta
                 if re.match(r"^\d{9,10}$", v):
                     self.identifiers.user_ids.add(v)
                     continue
@@ -194,9 +362,9 @@ class BinanceReportParser:
                     self.identifiers.kyc_images.append(str(img_path))
                     print(f"    Zapisano obrazek KYC: {img_path.name}")
             else:
-                print(f"    Brak osadzonych obrazków w KYC Documents (teksty: {texts})")
+                print(f"    Brak osadzonych obrazkow w KYC Documents (teksty: {texts})")
         except Exception as e:
-            print(f"  [!] Błąd przy wyciąganiu obrazków KYC: {e}")
+            print(f"  [!] Blad przy wyciaganiu obrazkow KYC: {e}")
 
     def _parse_access_logs(self, df: pd.DataFrame, sheet_name: str):
         for col, target in [
@@ -212,7 +380,6 @@ class BinanceReportParser:
                             target.add(v)
                         elif col != "Real IP":
                             target.add(v)
-        # User ID z Access Logs = powiązany (nie właściciel)
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -258,7 +425,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_txid(v):
                     self.identifiers.txids.add(v)
-        # User ID z Deposit History = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -276,7 +442,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_txid(v):
                     self.identifiers.txids.add(v)
-        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -289,7 +454,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_wallet_address(v):
                     self.identifiers.wallet_addresses.add(v)
-        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -313,7 +477,6 @@ class BinanceReportParser:
                 email = extract_email(v)
                 if email:
                     self.identifiers.emails.add(email)
-        # User Id = powiązany
         if "User Id" in df.columns:
             for v in df["User Id"].dropna():
                 v = clean_val(v)
@@ -331,7 +494,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # User Id = powiązany
         if "User Id" in df.columns:
             for v in df["User Id"].dropna():
                 v = clean_val(v)
@@ -354,7 +516,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.transaction_ids.add(v)
-        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -367,7 +528,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # Target UID = powiązany użytkownik
         if "Target UID" in df.columns:
             for v in df["Target UID"].dropna():
                 v = clean_val(v)
@@ -380,28 +540,8 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # UserId = powiązany
         if "UserId" in df.columns:
             for v in df["UserId"].dropna():
-                v = clean_val(v)
-                if v:
-                    self.identifiers.related_user_ids.add(str(v))
-
-    def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
-        self._parse_asset_log(df)
-
-    def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
-        self._parse_asset_log(df)
-
-    def _parse_asset_log(self, df: pd.DataFrame):
-        if "Transaction ID" in df.columns:
-            for v in df["Transaction ID"].dropna():
-                v = clean_val(v)
-                if v:
-                    self.identifiers.transaction_ids.add(v)
-        # User ID = powiązany
-        if "User ID" in df.columns:
-            for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
                     self.identifiers.related_user_ids.add(str(v))
@@ -412,7 +552,6 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)

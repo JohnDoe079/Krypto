@@ -1,18 +1,73 @@
-"""Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorów."""
+"""Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorow."""
 
 import re
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
 
+
+@dataclass
+class AssetBalance:
+    """Pojedyncze saldo waluty z Assets Overview."""
+    currency_name: str = ""
+    currency_code: str = ""
+    all_positions: str = ""
+    available_positions: str = ""
+    in_withdrawal: str = ""
+    pending_order: str = ""
+    btc_equivalent: str = ""
+    usdt_equivalent: str = ""
+    wallet_type: str = ""  # Spot, Futures, Earn, Margin, Pool, Funding, itp.
+
+    def to_dict(self) -> dict:
+        return {
+            "currency_name": self.currency_name,
+            "currency_code": self.currency_code,
+            "all_positions": self.all_positions,
+            "available_positions": self.available_positions,
+            "in_withdrawal": self.in_withdrawal,
+            "pending_order": self.pending_order,
+            "btc_equivalent": self.btc_equivalent,
+            "usdt_equivalent": self.usdt_equivalent,
+            "wallet_type": self.wallet_type,
+        }
+
+
+@dataclass
+class AssetTransaction:
+    """Pojedyncza transakcja z Spot/Funding Asset Log."""
+    time: str = ""
+    currency: str = ""
+    amount: str = ""
+    locked: str = ""
+    freeze: str = ""
+    processing: str = ""
+    change: str = ""
+    reason: str = ""
+    wallet_type: str = ""  # Spot lub Funding
+
+    def to_dict(self) -> dict:
+        return {
+            "time": self.time,
+            "currency": self.currency,
+            "amount": self.amount,
+            "locked": self.locked,
+            "freeze": self.freeze,
+            "processing": self.processing,
+            "change": self.change,
+            "reason": self.reason,
+            "wallet_type": self.wallet_type,
+        }
+
+
 @dataclass
 class ExtractedIdentifiers:
     source_file: str = ""
     exchange: str = ""
 
-    # GŁÓWNE ID użytkownika (tylko z Customer Information)
+    # GLOWNE ID uzytkownika (tylko z Customer Information)
     user_ids: Set[str] = field(default_factory=set)
-    # ID innych użytkowników (z P2P, Pay, itp.)
+    # ID innych uzytkownikow (z P2P, Pay, itp.)
     related_user_ids: Set[str] = field(default_factory=set)
 
     emails: Set[str] = field(default_factory=set)
@@ -36,7 +91,14 @@ class ExtractedIdentifiers:
     geolocations: Set[str] = field(default_factory=set)
     browsers: Set[str] = field(default_factory=set)
 
-    # Zakresy czasowe per arkusz: {"Deposit History": {"from": "...", "to": "..."}}
+    # NOWE: Salda i transakcje
+    estimate_total_btc: str = ""  # Estimate Total Balance(BTC) z Assets Overview
+    estimate_total_usdt: str = ""  # Jesli jest w USDT
+    asset_balances: List[AssetBalance] = field(default_factory=list)
+    spot_transactions: List[AssetTransaction] = field(default_factory=list)
+    funding_transactions: List[AssetTransaction] = field(default_factory=list)
+
+    # Zakresy czasowe per arkusz
     time_ranges: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     customer_info_sections: Dict[str, Dict[str, str]] = field(default_factory=dict)
@@ -70,6 +132,11 @@ class ExtractedIdentifiers:
             "id_numbers": sorted(self.id_numbers),
             "geolocations": sorted(self.geolocations),
             "browsers": sorted(self.browsers),
+            "estimate_total_btc": self.estimate_total_btc,
+            "estimate_total_usdt": self.estimate_total_usdt,
+            "asset_balances": [b.to_dict() for b in self.asset_balances],
+            "spot_transactions": [t.to_dict() for t in self.spot_transactions],
+            "funding_transactions": [t.to_dict() for t in self.funding_transactions],
             "time_ranges": self.time_ranges,
             "parsed_sheets": self.parsed_sheets,
             "unknown_sheets": self.unknown_sheets,
@@ -78,12 +145,12 @@ class ExtractedIdentifiers:
     def summary(self) -> str:
         lines = [
             f"Plik: {self.source_file}",
-            f"Giełda: {self.exchange}",
+            f"Gielda: {self.exchange}",
             f"  Arkuszy sparsowanych: {len(self.parsed_sheets)}",
-            f"  ID użytkownika (właściciel): {len(self.user_ids)}",
-            f"  ID powiązanych użytkowników: {len(self.related_user_ids)}",
+            f"  ID uzytkownika (wlasciciel): {len(self.user_ids)}",
+            f"  ID powiazanych uzytkownikow: {len(self.related_user_ids)}",
             f"  E-maile: {len(self.emails)}",
-            f"  Numery telefonów: {len(self.phones)}",
+            f"  Numery telefonow: {len(self.phones)}",
             f"  IP: {len(self.ips)}",
             f"  Adresy portfeli: {len(self.wallet_addresses)}",
             f"  TXID: {len(self.txids)}",
@@ -91,17 +158,21 @@ class ExtractedIdentifiers:
             f"  Ostatnie 4 cyfry kart: {len(self.card_last4)}",
             f"  IBAN: {len(self.ibans)}",
             f"  Numery kont: {len(self.account_numbers)}",
-            f"  ID urządzeń: {len(self.device_ids)}",
+            f"  ID urzadzen: {len(self.device_ids)}",
             f"  ID Fvideo: {len(self.fvideo_ids)}",
             f"  UUID BNC: {len(self.bnc_uuids)}",
-            f"  ID zamówień: {len(self.order_ids)}",
-            f"  ID kontrahentów: {len(self.counterparty_ids)}",
+            f"  ID zamowien: {len(self.order_ids)}",
+            f"  ID kontrahentow: {len(self.counterparty_ids)}",
             f"  ID transakcji: {len(self.transaction_ids)}",
             f"  Imiona/nazwiska: {len(self.names)}",
-            f"  Narodowości: {len(self.nationalities)}",
-            f"  Numery dokumentów: {len(self.id_numbers)}",
+            f"  Narodowosci: {len(self.nationalities)}",
+            f"  Numery dokumentow: {len(self.id_numbers)}",
             f"  Lokalizacje: {len(self.geolocations)}",
-            f"  Przeglądarki: {len(self.browsers)}",
+            f"  Przegladarki: {len(self.browsers)}",
+            f"  Estimate Total BTC: {self.estimate_total_btc}",
+            f"  Salda walut: {len(self.asset_balances)}",
+            f"  Transakcje Spot: {len(self.spot_transactions)}",
+            f"  Transakcje Funding: {len(self.funding_transactions)}",
             f"  Zakresy czasowe: {len(self.time_ranges)}",
         ]
         return "\n".join(lines)
@@ -175,7 +246,7 @@ def extract_phone(val: str) -> Optional[str]:
 
 
 def extract_time_range(df: pd.DataFrame) -> Optional[Dict[str, str]]:
-    """Wyciąga zakres czasowy z DataFrame jeżeli znajdzie kolumny czasowe."""
+    """Wyciaga zakres czasowy z DataFrame jezeli znajdzie kolumny czasowe."""
     time_cols = [c for c in df.columns if any(
         kw in str(c).lower() for kw in ["time", "date", "create", "update", "login", "timestamp"]
     )]
