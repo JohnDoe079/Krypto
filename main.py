@@ -3,14 +3,14 @@
 """
 main.py
 =======
-Auto-scan katalogów data/binance/ i data/htx/.
-Parsuje WSZYSTKIE pliki .xlsx, porównuje między sobą,
+Auto-scan katalogow data/binance/ i data/htx/.
+Parsuje WSZYSTKIE pliki .xlsx, porownuje miedzy soba,
 generuje raport DOCX.
 
-Użycie:
-    python main.py              # auto-scan + raport
-    python main.py --no-docx    # tylko JSON, bez DOCX
-    python main.py -v           # szczegółowe logi
+Uzycie:
+  python main.py              # auto-scan + raport
+  python main.py --no-docx    # tylko JSON, bez DOCX
+  python main.py -v           # szczegolowe logi
 """
 
 import argparse
@@ -34,11 +34,11 @@ def scan_directory(dir_path: str) -> List[Path]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Parser i komparator raportów giełdowych"
+        description="Parser i komparator raportow gieldowych"
     )
     parser.add_argument(
         "-o", "--output", default="parsed_report.json",
-        help="Plik wyjściowy JSON"
+        help="Plik wyjsciowy JSON"
     )
     parser.add_argument(
         "-r", "--report", default="Raport_Analiza.docx",
@@ -50,7 +50,7 @@ def main():
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true",
-        help="Szczegółowe logi"
+        help="Szczegolowe logi"
     )
     args = parser.parse_args()
 
@@ -64,7 +64,7 @@ def main():
     for exchange, dir_path in DATA_DIRS.items():
         files = scan_directory(dir_path)
         if files:
-            print(f"\n📁 {exchange.upper()}: znaleziono {len(files)} plik(ów)")
+            print(f"\n📁 {exchange.upper()}: znaleziono {len(files)} plik(ow)")
             for file_path in files:
                 print(f"  📄 {file_path.name}")
                 if exchange == "binance":
@@ -81,10 +81,10 @@ def main():
                 if args.verbose:
                     print("\n" + ids.summary())
         else:
-            print(f"\n📁 {exchange.upper()}: brak plików w {dir_path}/")
+            print(f"\n📁 {exchange.upper()}: brak plikow w {dir_path}/")
 
     if not reports:
-        print("\n[!] Nie znaleziono żadnych plików .xlsx.")
+        print("\n[!] Nie znaleziono zadnych plikow .xlsx.")
         return
 
     # Zapisz JSON
@@ -93,17 +93,17 @@ def main():
         json.dump(output_data, f, indent=2, ensure_ascii=False)
     print(f"\n💾 Zapisano wyniki JSON do: {args.output}")
 
-    # Porównanie
+    # Porownanie
     if len(reports) >= 2:
-        print(f"\n🔍 Porównywanie {len(reports)} raportów...")
+        print(f"\n🔍 Porownywanie {len(reports)} raportow...")
         comp = ReportComparator(reports)
         comp.print_comparison()
         comp_file = args.output.replace(".json", "_comparison.json")
         with open(comp_file, "w", encoding="utf-8") as f:
             json.dump(comp.compare(), f, indent=2, ensure_ascii=False)
-        print(f"\n💾 Zapisano porównanie do: {comp_file}")
+        print(f"\n💾 Zapisano porownanie do: {comp_file}")
     else:
-        print(f"\nℹ️  Tylko 1 raport — brak porównania.")
+        print(f"\nℹ️ Tylko 1 raport — brak porownania.")
 
     # Generuj raport DOCX
     if not args.no_docx:

@@ -2,7 +2,6 @@
 """Konfiguracja nazw arkuszy i mapowania kolumn."""
 
 # Znane arkusze Binance -> metoda parsera
-# Jeśli arkusz jest w pliku ale nie ma go tu, zostanie sparsowany generycznie
 BINANCE_SHEETS = {
     "Customer Information": "customer_info",
     "KYC Documents": "kyc_docs",

@@ -1,5 +1,4 @@
-# parsers/binance_parser.py
-"""Parser raportów użytkownika Binance w formacie .xlsx."""
+"""Parser raportow uzytkownika Binance w formacie .xlsx."""
 
 import pandas as pd
 import re
@@ -15,6 +14,7 @@ from models.schemas import (
     is_txid,
     extract_email,
     extract_phone,
+    extract_time_range,
 )
 from config import BINANCE_SHEETS
 
@@ -36,18 +36,18 @@ class BinanceReportParser:
             try:
                 self._parse_sheet(sheet_name)
             except Exception as e:
-                print(f"    [!] Błąd w arkuszu '{sheet_name}': {e}")
+                print(f"  [!] Blad w arkuszu '{sheet_name}': {e}")
 
         if self.identifiers.unknown_sheets:
-            print(f"  ⚠️  Nieznane arkusze (sparsowane generycznie): {', '.join(self.identifiers.unknown_sheets)}")
+            print(f"  [!] Nieznane arkusze (sparsowane generycznie): {', '.join(self.identifiers.unknown_sheets)}")
 
-        # Dedup telefonów: Mobile ma kierunkowy (+380...), SMS bez kierunkowego
+        # Dedup telefonow: Mobile ma kierunkowy (+380...), SMS bez kierunkowego
         self._dedup_phones()
 
         return self.identifiers
 
     def _dedup_phones(self):
-        """Jeżeli SMS jest podzbiorem Mobile (bez kierunkowego), usuń duplikat."""
+        """Jezeli SMS jest podzbiorem Mobile (bez kierunkowego), usun duplikat."""
         phones = sorted(self.identifiers.phones)
         to_remove = set()
         for p1 in phones:
@@ -62,18 +62,27 @@ class BinanceReportParser:
                     to_remove.add(p1)
         self.identifiers.phones -= to_remove
 
+    def _add_time_range(self, df: pd.DataFrame, sheet_name: str):
+        """Zapisuje zakres czasowy arkusza jezeli znajdzie kolumny czasowe."""
+        tr = extract_time_range(df)
+        if tr:
+            self.identifiers.time_ranges[sheet_name] = tr
+            print(f"    Zakres czasowy '{sheet_name}': {tr['from']} -> {tr['to']}")
+
     def _parse_sheet(self, sheet_name: str):
         if sheet_name == "Customer Information":
             df = pd.read_excel(
                 self.file_path, sheet_name=sheet_name, header=None, engine="openpyxl"
             )
             self._parse_customer_info_raw(df)
+            self._add_time_range(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
         elif sheet_name == "KYC Documents":
             df = pd.read_excel(
                 self.file_path, sheet_name=sheet_name, header=None, engine="openpyxl"
             )
             self._parse_kyc_documents(df)
+            self._add_time_range(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
         else:
             df = pd.read_excel(
@@ -84,10 +93,12 @@ class BinanceReportParser:
                 method_name = f"_parse_{internal_name}"
                 method = getattr(self, method_name, self._parse_generic)
                 method(df, sheet_name)
+                self._add_time_range(df, sheet_name)
                 self.identifiers.parsed_sheets.append(sheet_name)
             else:
-                print(f"    ⚠️  Nieznany arkusz: '{sheet_name}' — parsowanie generyczne")
+                print(f"  [!] Nieznany arkusz: '{sheet_name}' — parsowanie generyczne")
                 self._parse_generic(df, sheet_name)
+                self._add_time_range(df, sheet_name)
                 self.identifiers.unknown_sheets.append(sheet_name)
                 self.identifiers.parsed_sheets.append(sheet_name)
 
@@ -107,8 +118,8 @@ class BinanceReportParser:
                     current_section = val
                     sections[current_section] = {}
                     headers = None
-                    i += 1
-                    continue
+                i += 1
+                continue
 
             if current_section and len(non_null) > 1 and headers is None:
                 headers = [clean_val(v) for v in row.values]
@@ -148,6 +159,7 @@ class BinanceReportParser:
                     self.identifiers.ips.add(v)
                     continue
 
+                # User ID z Customer Information = wlasciciel konta
                 if re.match(r"^\d{9,10}$", v):
                     self.identifiers.user_ids.add(v)
                     continue
@@ -156,7 +168,7 @@ class BinanceReportParser:
                     self.identifiers.id_numbers.add(v)
                     continue
 
-                if col and "nationality" in col.lower() and len(v) == 2 and v.isalpha():
+                if col and "nationality" in str(col).lower() and len(v) == 2 and v.isalpha():
                     self.identifiers.nationalities.add(v)
                     continue
 
@@ -180,11 +192,11 @@ class BinanceReportParser:
                     with open(img_path, "wb") as fimg:
                         fimg.write(img._data())
                     self.identifiers.kyc_images.append(str(img_path))
-                    print(f"    💾 Zapisano obrazek KYC: {img_path.name}")
+                    print(f"    Zapisano obrazek KYC: {img_path.name}")
             else:
-                print(f"    ℹ️  Brak osadzonych obrazków w KYC Documents (teksty: {texts})")
+                print(f"    Brak osadzonych obrazkow w KYC Documents (teksty: {texts})")
         except Exception as e:
-            print(f"    [!] Błąd przy wyciąganiu obrazków KYC: {e}")
+            print(f"  [!] Blad przy wyciaganiu obrazkow KYC: {e}")
 
     def _parse_access_logs(self, df: pd.DataFrame, sheet_name: str):
         for col, target in [
@@ -200,11 +212,12 @@ class BinanceReportParser:
                             target.add(v)
                         elif col != "Real IP":
                             target.add(v)
+        # User ID z Access Logs = powiazany (nie wlasciciel)
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_approved_devices(self, df: pd.DataFrame, sheet_name: str):
         if "IP Address" in df.columns:
@@ -245,11 +258,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_txid(v):
                     self.identifiers.txids.add(v)
+        # User ID z Deposit History = powiazany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_withdrawal_history(self, df: pd.DataFrame, sheet_name: str):
         if "Destination Address" in df.columns:
@@ -262,11 +276,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_txid(v):
                     self.identifiers.txids.add(v)
+        # User ID = powiazany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_attempted_withdrawal(self, df: pd.DataFrame, sheet_name: str):
         if "Address" in df.columns:
@@ -274,11 +289,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_wallet_address(v):
                     self.identifiers.wallet_addresses.add(v)
+        # User ID = powiazany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_fiat_deposit(self, df: pd.DataFrame, sheet_name: str):
         for col, target in [
@@ -297,11 +313,12 @@ class BinanceReportParser:
                 email = extract_email(v)
                 if email:
                     self.identifiers.emails.add(email)
+        # User Id = powiazany
         if "User Id" in df.columns:
             for v in df["User Id"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_fiat_trades(self, df: pd.DataFrame, sheet_name: str):
         if "User Email" in df.columns:
@@ -314,11 +331,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
+        # User Id = powiazany
         if "User Id" in df.columns:
             for v in df["User Id"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_binance_pay(self, df: pd.DataFrame, sheet_name: str):
         if "Counterparty Wallet ID" in df.columns:
@@ -336,11 +354,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.transaction_ids.add(v)
+        # User ID = powiazany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_p2p(self, df: pd.DataFrame, sheet_name: str):
         if "Order ID" in df.columns:
@@ -348,11 +367,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
+        # Target UID = powiazany uzytkownik
         if "Target UID" in df.columns:
             for v in df["Target UID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_otc_trading(self, df: pd.DataFrame, sheet_name: str):
         if "OrderId" in df.columns:
@@ -360,11 +380,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
+        # UserId = powiazany
         if "UserId" in df.columns:
             for v in df["UserId"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
         self._parse_asset_log(df)
@@ -378,11 +399,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.transaction_ids.add(v)
+        # User ID = powiazany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_order_history(self, df: pd.DataFrame, sheet_name: str):
         if "Order ID" in df.columns:
@@ -390,11 +412,12 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
+        # User ID = powiazany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.user_ids.add(str(v))
+                    self.identifiers.related_user_ids.add(str(v))
 
     def _parse_generic(self, df: pd.DataFrame, sheet_name: str):
         found = {"ips": 0, "wallets": 0, "txids": 0, "emails": 0}
@@ -419,4 +442,4 @@ class BinanceReportParser:
                         found["emails"] += 1
         total = sum(found.values())
         if total > 0:
-            print(f"      Generycznie znaleziono: {found}")
+            print(f"    Generycznie znaleziono: {found}")

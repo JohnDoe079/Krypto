@@ -1,18 +1,20 @@
-# models/schemas.py
-"""Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorów."""
+"""Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorow."""
 
 import re
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
 
-
 @dataclass
 class ExtractedIdentifiers:
     source_file: str = ""
     exchange: str = ""
 
+    # GLOWNE ID uzytkownika (tylko z Customer Information)
     user_ids: Set[str] = field(default_factory=set)
+    # ID innych uzytkownikow (z P2P, Pay, itp.)
+    related_user_ids: Set[str] = field(default_factory=set)
+
     emails: Set[str] = field(default_factory=set)
     phones: Set[str] = field(default_factory=set)
     ips: Set[str] = field(default_factory=set)
@@ -34,6 +36,9 @@ class ExtractedIdentifiers:
     geolocations: Set[str] = field(default_factory=set)
     browsers: Set[str] = field(default_factory=set)
 
+    # Zakresy czasowe per arkusz: {"Deposit History": {"from": "...", "to": "..."}}
+    time_ranges: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
     customer_info_sections: Dict[str, Dict[str, str]] = field(default_factory=dict)
     kyc_images: List[str] = field(default_factory=list)
     parsed_sheets: List[str] = field(default_factory=list)
@@ -44,6 +49,7 @@ class ExtractedIdentifiers:
             "source_file": self.source_file,
             "exchange": self.exchange,
             "user_ids": sorted(self.user_ids),
+            "related_user_ids": sorted(self.related_user_ids),
             "emails": sorted(self.emails),
             "phones": sorted(self.phones),
             "ips": sorted(self.ips),
@@ -64,6 +70,7 @@ class ExtractedIdentifiers:
             "id_numbers": sorted(self.id_numbers),
             "geolocations": sorted(self.geolocations),
             "browsers": sorted(self.browsers),
+            "time_ranges": self.time_ranges,
             "parsed_sheets": self.parsed_sheets,
             "unknown_sheets": self.unknown_sheets,
         }
@@ -71,11 +78,12 @@ class ExtractedIdentifiers:
     def summary(self) -> str:
         lines = [
             f"Plik: {self.source_file}",
-            f"Giełda: {self.exchange}",
+            f"Gielda: {self.exchange}",
             f"  Arkuszy sparsowanych: {len(self.parsed_sheets)}",
-            f"  ID użytkowników: {len(self.user_ids)}",
+            f"  ID uzytkownika (wlasciciel): {len(self.user_ids)}",
+            f"  ID powiazanych uzytkownikow: {len(self.related_user_ids)}",
             f"  E-maile: {len(self.emails)}",
-            f"  Numery telefonów: {len(self.phones)}",
+            f"  Numery telefonow: {len(self.phones)}",
             f"  IP: {len(self.ips)}",
             f"  Adresy portfeli: {len(self.wallet_addresses)}",
             f"  TXID: {len(self.txids)}",
@@ -83,17 +91,18 @@ class ExtractedIdentifiers:
             f"  Ostatnie 4 cyfry kart: {len(self.card_last4)}",
             f"  IBAN: {len(self.ibans)}",
             f"  Numery kont: {len(self.account_numbers)}",
-            f"  ID urządzeń: {len(self.device_ids)}",
+            f"  ID urzadzen: {len(self.device_ids)}",
             f"  ID Fvideo: {len(self.fvideo_ids)}",
             f"  UUID BNC: {len(self.bnc_uuids)}",
-            f"  ID zamówień: {len(self.order_ids)}",
-            f"  ID kontrahentów: {len(self.counterparty_ids)}",
+            f"  ID zamowien: {len(self.order_ids)}",
+            f"  ID kontrahentow: {len(self.counterparty_ids)}",
             f"  ID transakcji: {len(self.transaction_ids)}",
             f"  Imiona/nazwiska: {len(self.names)}",
-            f"  Narodowości: {len(self.nationalities)}",
-            f"  Numery dokumentów: {len(self.id_numbers)}",
+            f"  Narodowosci: {len(self.nationalities)}",
+            f"  Numery dokumentow: {len(self.id_numbers)}",
             f"  Lokalizacje: {len(self.geolocations)}",
-            f"  Przeglądarki: {len(self.browsers)}",
+            f"  Przegladarki: {len(self.browsers)}",
+            f"  Zakresy czasowe: {len(self.time_ranges)}",
         ]
         return "\n".join(lines)
 
@@ -102,7 +111,7 @@ def clean_val(val) -> Optional[str]:
     if pd.isna(val):
         return None
     v = str(val).strip()
-    if v in ("", "N/A", "nan", "None", "NaN"):
+    if v in ("", "N/A", "nan", "None", "NaN", "-"):
         return None
     return v
 
@@ -110,7 +119,13 @@ def clean_val(val) -> Optional[str]:
 def is_valid_ip(val: str) -> bool:
     if not val:
         return False
-    return bool(re.match(r"^(\d{1,3}\.){3}\d{1,3}$", val.strip()))
+    v = val.strip()
+    if not re.match(r"^(\d{1,3}\.){3}\d{1,3}$", v):
+        return False
+    try:
+        return all(0 <= int(x) <= 255 for x in v.split("."))
+    except ValueError:
+        return False
 
 
 def is_wallet_address(val: str) -> bool:
@@ -142,6 +157,7 @@ def extract_email(val: str) -> Optional[str]:
     if not v:
         return None
     v = v.lstrip("'")
+    # Bardziej rygorystyczny regex
     if re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", v):
         return v.lower()
     return None
@@ -152,8 +168,38 @@ def extract_phone(val: str) -> Optional[str]:
     if not v:
         return None
     v = v.lstrip("'")
+    # Pomin daty
     if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
         return None
-    if re.match(r"^[\+\d][\d\s\-\(\)]{7,20}$", v):
+    # Numery z kierunkowym, spacjami, myslnikami, nawiasami
+    if re.match(r"^[\+\d][\d\s\-\(\)]{7,25}$", v):
         return v
     return None
+
+
+def extract_time_range(df: pd.DataFrame) -> Optional[Dict[str, str]]:
+    """Wyciaga zakres czasowy z DataFrame jezeli znajdzie kolumny czasowe."""
+    time_cols = [c for c in df.columns if any(
+        kw in str(c).lower() for kw in ["time", "date", "create", "update", "login", "timestamp"]
+    )]
+    if not time_cols:
+        return None
+
+    all_dates = []
+    for col in time_cols:
+        try:
+            # Proba konwersji na datetime
+            parsed = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
+            valid = parsed.dropna()
+            if len(valid) > 0:
+                all_dates.extend(valid.tolist())
+        except Exception:
+            continue
+
+    if not all_dates:
+        return None
+
+    return {
+        "from": min(all_dates).strftime("%Y-%m-%d %H:%M:%S"),
+        "to": max(all_dates).strftime("%Y-%m-%d %H:%M:%S"),
+    }
