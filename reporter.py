@@ -420,6 +420,10 @@ class ReportGenerator:
         for idx, r in enumerate(reports, 1):
             self._add_heading(f"2.{idx}. {r.source_file}", level=2)
             self._add_paragraph(f"Gielda: {r.exchange.upper()}")
+            # ID uzytkownika — wyraznie na poczatku
+            if r.user_ids:
+                uid_str = ", ".join(sorted(r.user_ids))
+                self._add_paragraph(f"ID uzytkownika (wlasciciel konta): {uid_str}", bold=True, color=RGBColor(0x00, 0x00, 0x80))
             self._add_paragraph(
                 f"Przeanalizowane arkusze ({len(r.parsed_sheets)}): {', '.join(r.parsed_sheets)}")
             if r.unknown_sheets:
