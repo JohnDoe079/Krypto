@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from typing import Dict, List
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
@@ -32,7 +32,7 @@ BASIC_INFO_ORDER = [
     "SMS", "SMS Opening time", "Tax ID", "TnC", "TnC Sign Date",
 ]
 
-PAGE_WIDTH_INCHES = 6.1
+PAGE_WIDTH_INCHES = 7.0
 
 
 class ReportGenerator:
@@ -40,6 +40,14 @@ class ReportGenerator:
         self.output_path = output_path
         self.doc = Document()
         self._setup_styles()
+        self._setup_margins()
+
+    def _setup_margins(self):
+        section = self.doc.sections[0]
+        section.left_margin = Cm(1.5)
+        section.right_margin = Cm(1.0)
+        section.top_margin = Cm(1.5)
+        section.bottom_margin = Cm(1.5)
 
     def _setup_styles(self):
         style = self.doc.styles['Normal']
@@ -135,6 +143,11 @@ class ReportGenerator:
                  for col, val in rest]
         return rows
 
+    def _add_time_range_for_sheet(self, r: ExtractedIdentifiers, sheet_name: str):
+        if sheet_name in r.time_ranges:
+            tr = r.time_ranges[sheet_name]
+            self._add_paragraph(f"    Zakres czasowy: {tr['from']}  →  {tr['to']}", color=RGBColor(0x40, 0x40, 0x40))
+
     def _render_customer_info(self, r: ExtractedIdentifiers):
         if not r.customer_info_sections:
             return
@@ -191,19 +204,20 @@ class ReportGenerator:
         if r.estimate_total_btc:
             self._add_paragraph(f"Estimate Total Balance (BTC): {r.estimate_total_btc}", bold=True)
         if r.asset_balances:
+            # Kompaktowa tabela: 4 kolumny
             bal_rows = []
             for b in r.asset_balances:
+                waluta = b.currency_code
+                if b.currency_name and b.currency_name != "—":
+                    waluta = f"{b.currency_code} ({b.currency_name})"
                 bal_rows.append([
-                    b.currency_code,
-                    b.currency_name if b.currency_name else "—",
+                    waluta,
                     b.all_positions,
-                    b.available_positions,
                     b.btc_equivalent,
-                    b.usdt_equivalent,
                     b.wallet_type,
                 ])
             self._add_table(
-                ["Kod", "Nazwa", "Wszystkie", "Dostepne", "BTC Eq.", "USDT Eq.", "Portfel"],
+                ["Waluta", "Saldo", "Wartosc BTC", "Portfel"],
                 bal_rows, max_rows=100)
         else:
             self._add_paragraph("Brak danych o saldach walut (wszystkie salda to 0 lub arkusz nie zawiera tabeli).")
@@ -212,6 +226,7 @@ class ReportGenerator:
         if not r.spot_transactions:
             return
         self._add_heading("Spot Asset Log (Historia ruchow Spot)", level=3)
+        self._add_time_range_for_sheet(r, "Spot Asset Log")
         self._add_paragraph(f"Liczba transakcji Spot: {len(r.spot_transactions)}")
         txn_rows = []
         for t in r.spot_transactions[:50]:
@@ -229,6 +244,7 @@ class ReportGenerator:
         if not r.funding_transactions:
             return
         self._add_heading("Funding Asset Log (Historia ruchow Funding)", level=3)
+        self._add_time_range_for_sheet(r, "Funding Asset Log")
         self._add_paragraph(f"Liczba transakcji Funding: {len(r.funding_transactions)}")
         txn_rows = []
         for t in r.funding_transactions[:50]:
@@ -241,15 +257,6 @@ class ReportGenerator:
             txn_rows, max_rows=50)
         if len(r.funding_transactions) > 50:
             self._add_paragraph(f"... oraz {len(r.funding_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
-
-    def _render_time_ranges(self, r: ExtractedIdentifiers):
-        if not r.time_ranges:
-            return
-        self._add_heading("Zakresy czasowe per arkusz", level=3)
-        time_rows = []
-        for sheet_name, tr in sorted(r.time_ranges.items()):
-            time_rows.append([sheet_name, tr.get("from", ""), tr.get("to", "")])
-        self._add_table(["Arkusz", "Od", "Do"], time_rows, max_rows=50)
 
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
         # ===== STRONA TYTULOWA =====
@@ -328,7 +335,19 @@ class ReportGenerator:
                     f"Nieznane arkusze: {', '.join(r.unknown_sheets)}",
                     color=RGBColor(0xC0, 0x00, 0x00))
 
-            # Renderujemy w kolejnosci parsed_sheets (tak jak w Excelu)
+            # GLOBALNY ZAKRES CZASOWY KONTA — przed pierwszym arkuszem
+            all_from = []
+            all_to = []
+            for tr in r.time_ranges.values():
+                all_from.append(tr.get("from", ""))
+                all_to.append(tr.get("to", ""))
+            if all_from and all_to:
+                self._add_paragraph(
+                    f"Globalny zakres czasowy konta: {min(all_from)}  →  {max(all_to)}",
+                    bold=True, color=RGBColor(0x00, 0x40, 0x80))
+                self._add_paragraph("")
+
+            # Renderujemy w kolejnosci parsed_sheets
             for sheet_name in r.parsed_sheets:
                 if sheet_name == "Customer Information":
                     self._render_customer_info(r)
@@ -342,8 +361,6 @@ class ReportGenerator:
                     self._render_funding_asset_log(r)
                 # Inne arkusze beda dodawane pozniej
 
-            # Zakresy czasowe na koncu sekcji pliku
-            self._render_time_ranges(r)
             self.doc.add_page_break()
 
         # ===== 3. POROWNANIE =====

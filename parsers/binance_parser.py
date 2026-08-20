@@ -26,14 +26,18 @@ def _fmt_num(val) -> str:
     if val is None or val == "":
         return ""
     try:
-        f = float(val)
-        # Jezeli to liczba calkowita
+        # Decimal, float, int, string — wszystko na float
+        if hasattr(val, "to_eng_string"):
+            f = float(val)
+        else:
+            f = float(val)
+        if abs(f) < 1e-12:
+            return "0"
         if f == int(f):
             return str(int(f))
-        # Formatujemy z max 8 miejsc po przecinku, usuwamy zera na koncu
-        s = f"{f:.10f}".rstrip("0").rstrip(".")
+        s = f"{f:.12f}".rstrip("0").rstrip(".")
         return s
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return str(val).strip()
 
 
@@ -42,8 +46,10 @@ def _is_zero(val) -> bool:
     if val is None or val == "":
         return True
     try:
+        if hasattr(val, "to_eng_string"):
+            return val == 0
         return abs(float(val)) < 1e-12
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return False
 
 
