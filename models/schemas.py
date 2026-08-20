@@ -1,4 +1,4 @@
-"""Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorow."""
+"""Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorów."""
 
 import re
 import pandas as pd
@@ -10,9 +10,9 @@ class ExtractedIdentifiers:
     source_file: str = ""
     exchange: str = ""
 
-    # GLOWNE ID uzytkownika (tylko z Customer Information)
+    # GŁÓWNE ID użytkownika (tylko z Customer Information)
     user_ids: Set[str] = field(default_factory=set)
-    # ID innych uzytkownikow (z P2P, Pay, itp.)
+    # ID innych użytkowników (z P2P, Pay, itp.)
     related_user_ids: Set[str] = field(default_factory=set)
 
     emails: Set[str] = field(default_factory=set)
@@ -78,12 +78,12 @@ class ExtractedIdentifiers:
     def summary(self) -> str:
         lines = [
             f"Plik: {self.source_file}",
-            f"Gielda: {self.exchange}",
+            f"Giełda: {self.exchange}",
             f"  Arkuszy sparsowanych: {len(self.parsed_sheets)}",
-            f"  ID uzytkownika (wlasciciel): {len(self.user_ids)}",
-            f"  ID powiazanych uzytkownikow: {len(self.related_user_ids)}",
+            f"  ID użytkownika (właściciel): {len(self.user_ids)}",
+            f"  ID powiązanych użytkowników: {len(self.related_user_ids)}",
             f"  E-maile: {len(self.emails)}",
-            f"  Numery telefonow: {len(self.phones)}",
+            f"  Numery telefonów: {len(self.phones)}",
             f"  IP: {len(self.ips)}",
             f"  Adresy portfeli: {len(self.wallet_addresses)}",
             f"  TXID: {len(self.txids)}",
@@ -91,17 +91,17 @@ class ExtractedIdentifiers:
             f"  Ostatnie 4 cyfry kart: {len(self.card_last4)}",
             f"  IBAN: {len(self.ibans)}",
             f"  Numery kont: {len(self.account_numbers)}",
-            f"  ID urzadzen: {len(self.device_ids)}",
+            f"  ID urządzeń: {len(self.device_ids)}",
             f"  ID Fvideo: {len(self.fvideo_ids)}",
             f"  UUID BNC: {len(self.bnc_uuids)}",
-            f"  ID zamowien: {len(self.order_ids)}",
-            f"  ID kontrahentow: {len(self.counterparty_ids)}",
+            f"  ID zamówień: {len(self.order_ids)}",
+            f"  ID kontrahentów: {len(self.counterparty_ids)}",
             f"  ID transakcji: {len(self.transaction_ids)}",
             f"  Imiona/nazwiska: {len(self.names)}",
-            f"  Narodowosci: {len(self.nationalities)}",
-            f"  Numery dokumentow: {len(self.id_numbers)}",
+            f"  Narodowości: {len(self.nationalities)}",
+            f"  Numery dokumentów: {len(self.id_numbers)}",
             f"  Lokalizacje: {len(self.geolocations)}",
-            f"  Przegladarki: {len(self.browsers)}",
+            f"  Przeglądarki: {len(self.browsers)}",
             f"  Zakresy czasowe: {len(self.time_ranges)}",
         ]
         return "\n".join(lines)
@@ -157,7 +157,6 @@ def extract_email(val: str) -> Optional[str]:
     if not v:
         return None
     v = v.lstrip("'")
-    # Bardziej rygorystyczny regex
     if re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", v):
         return v.lower()
     return None
@@ -168,17 +167,15 @@ def extract_phone(val: str) -> Optional[str]:
     if not v:
         return None
     v = v.lstrip("'")
-    # Pomin daty
     if re.match(r"^\d{4}-\d{2}-\d{2}$", v):
         return None
-    # Numery z kierunkowym, spacjami, myslnikami, nawiasami
     if re.match(r"^[\+\d][\d\s\-\(\)]{7,25}$", v):
         return v
     return None
 
 
 def extract_time_range(df: pd.DataFrame) -> Optional[Dict[str, str]]:
-    """Wyciaga zakres czasowy z DataFrame jezeli znajdzie kolumny czasowe."""
+    """Wyciąga zakres czasowy z DataFrame jeżeli znajdzie kolumny czasowe."""
     time_cols = [c for c in df.columns if any(
         kw in str(c).lower() for kw in ["time", "date", "create", "update", "login", "timestamp"]
     )]
@@ -188,8 +185,7 @@ def extract_time_range(df: pd.DataFrame) -> Optional[Dict[str, str]]:
     all_dates = []
     for col in time_cols:
         try:
-            # Proba konwersji na datetime
-            parsed = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
+            parsed = pd.to_datetime(df[col], errors="coerce")
             valid = parsed.dropna()
             if len(valid) > 0:
                 all_dates.extend(valid.tolist())

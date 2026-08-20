@@ -1,11 +1,11 @@
-"""Parser raportow uzytkownika HTX w formacie .xlsx."""
+"""Parser raportów użytkownika HTX w formacie .xlsx."""
 
 from pathlib import Path
 from models.schemas import ExtractedIdentifiers
 
 
 class HTXReportParser:
-    """Placeholder — rozbudowa po dostarczeniu przykladowego pliku HTX."""
+    """Placeholder — rozbudowa po dostarczeniu przykładowego pliku HTX."""
 
     def __init__(self, file_path: str):
         self.file_path = Path(file_path)
@@ -16,5 +16,5 @@ class HTXReportParser:
 
     def parse_all(self) -> ExtractedIdentifiers:
         print("[!] Parser HTX nie jest jeszcze zaimplementowany.")
-        print("    Dostarcz przykladowy plik .xlsx z HTX, aby dodac obsluge.")
+        print("    Dostarcz przykładowy plik .xlsx z HTX, aby dodać obsługę.")
         return self.identifiers

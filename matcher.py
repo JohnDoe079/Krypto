@@ -1,4 +1,4 @@
-"""Porownuje identyfikatory miedzy raportami z roznych gield."""
+"""Porównuje identyfikatory między raportami z różnych giełd."""
 
 from typing import Dict, List, Any
 from models.schemas import ExtractedIdentifiers
@@ -9,14 +9,14 @@ class ReportComparator:
         self.reports = reports
 
     def _get_all_ids_for_field(self, report: ExtractedIdentifiers, field_name: str) -> set:
-        """Zwraca wszystkie ID dla danego pola (laczy user_ids + related_user_ids jezeli to user)."""
+        """Zwraca wszystkie ID dla danego pola (łączy user_ids + related_user_ids jeżeli to user)."""
         if field_name == "all_user_ids":
             return report.user_ids | report.related_user_ids
         return set(getattr(report, field_name, set()))
 
     def compare(self) -> Dict[str, Any]:
         if len(self.reports) < 2:
-            return {"error": "Potrzebne sa co najmniej 2 raporty do porownania."}
+            return {"error": "Potrzebne są co najmniej 2 raporty do porównania."}
 
         result = {
             "compared_files": [r.source_file for r in self.reports],
@@ -39,7 +39,7 @@ class ReportComparator:
             if common:
                 result["common"][field_name] = []
                 for val in sorted(common):
-                    # Znajdz pliki, w ktorych wystepuje ta wartosc
+                    # Znajdź pliki, w których występuje ta wartość
                     files_with_val = []
                     time_overview = []
                     for r in self.reports:
@@ -80,26 +80,26 @@ class ReportComparator:
     def print_comparison(self):
         result = self.compare()
         print("\n" + "=" * 70)
-        print("POROWNANIE RAPORTOW")
+        print("PORÓWNANIE RAPORTÓW")
         print("=" * 70)
         print(f"Pliki: {', '.join(result.get('compared_files', []))}")
 
         common = result.get("common", {})
         if common:
-            print("\n🔴 WSPOLNE IDENTYFIKATORY (POTENCJALNE POWIAZANIA):")
+            print("\n🔴 WSPÓLNE IDENTYFIKATORY (POTENCJALNE POWIĄZANIA):")
             print("-" * 70)
             for field, entries in common.items():
-                print(f"\n  [{field}] — {len(entries)} wspolnych:")
+                print(f"\n  [{field}] — {len(entries)} wspólnych:")
                 for e in entries:
                     files_str = ", ".join(e["files"])
-                    print(f"    → {e['value']}  (wystepuje w: {files_str})")
+                    print(f"    → {e['value']}  (występuje w: {files_str})")
                     if "time_context" in e:
                         for tc in e["time_context"]:
                             print(f"       Czas ({tc['file']}):")
                             for r in tc["ranges"][:3]:  # max 3 zakresy
                                 print(f"         • {r}")
         else:
-            print("\n✅ Nie znaleziono wspolnych identyfikatorow.")
+            print("\n✅ Nie znaleziono wspólnych identyfikatorów.")
 
         unique = result.get("unique_per_file", {})
         if unique:

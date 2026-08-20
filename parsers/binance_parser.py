@@ -1,4 +1,4 @@
-"""Parser raportow uzytkownika Binance w formacie .xlsx."""
+"""Parser raportów użytkownika Binance w formacie .xlsx."""
 
 import pandas as pd
 import re
@@ -36,18 +36,18 @@ class BinanceReportParser:
             try:
                 self._parse_sheet(sheet_name)
             except Exception as e:
-                print(f"  [!] Blad w arkuszu '{sheet_name}': {e}")
+                print(f"  [!] Błąd w arkuszu '{sheet_name}': {e}")
 
         if self.identifiers.unknown_sheets:
             print(f"  [!] Nieznane arkusze (sparsowane generycznie): {', '.join(self.identifiers.unknown_sheets)}")
 
-        # Dedup telefonow: Mobile ma kierunkowy (+380...), SMS bez kierunkowego
+        # Dedup telefonów: Mobile ma kierunkowy (+380...), SMS bez kierunkowego
         self._dedup_phones()
 
         return self.identifiers
 
     def _dedup_phones(self):
-        """Jezeli SMS jest podzbiorem Mobile (bez kierunkowego), usun duplikat."""
+        """Jeżeli SMS jest podzbiorem Mobile (bez kierunkowego), usuń duplikat."""
         phones = sorted(self.identifiers.phones)
         to_remove = set()
         for p1 in phones:
@@ -63,7 +63,7 @@ class BinanceReportParser:
         self.identifiers.phones -= to_remove
 
     def _add_time_range(self, df: pd.DataFrame, sheet_name: str):
-        """Zapisuje zakres czasowy arkusza jezeli znajdzie kolumny czasowe."""
+        """Zapisuje zakres czasowy arkusza jeżeli znajdzie kolumny czasowe."""
         tr = extract_time_range(df)
         if tr:
             self.identifiers.time_ranges[sheet_name] = tr
@@ -159,7 +159,7 @@ class BinanceReportParser:
                     self.identifiers.ips.add(v)
                     continue
 
-                # User ID z Customer Information = wlasciciel konta
+                # User ID z Customer Information = właściciel konta
                 if re.match(r"^\d{9,10}$", v):
                     self.identifiers.user_ids.add(v)
                     continue
@@ -194,9 +194,9 @@ class BinanceReportParser:
                     self.identifiers.kyc_images.append(str(img_path))
                     print(f"    Zapisano obrazek KYC: {img_path.name}")
             else:
-                print(f"    Brak osadzonych obrazkow w KYC Documents (teksty: {texts})")
+                print(f"    Brak osadzonych obrazków w KYC Documents (teksty: {texts})")
         except Exception as e:
-            print(f"  [!] Blad przy wyciaganiu obrazkow KYC: {e}")
+            print(f"  [!] Błąd przy wyciąganiu obrazków KYC: {e}")
 
     def _parse_access_logs(self, df: pd.DataFrame, sheet_name: str):
         for col, target in [
@@ -212,7 +212,7 @@ class BinanceReportParser:
                             target.add(v)
                         elif col != "Real IP":
                             target.add(v)
-        # User ID z Access Logs = powiazany (nie wlasciciel)
+        # User ID z Access Logs = powiązany (nie właściciel)
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -258,7 +258,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_txid(v):
                     self.identifiers.txids.add(v)
-        # User ID z Deposit History = powiazany
+        # User ID z Deposit History = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -276,7 +276,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_txid(v):
                     self.identifiers.txids.add(v)
-        # User ID = powiazany
+        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -289,7 +289,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v and is_wallet_address(v):
                     self.identifiers.wallet_addresses.add(v)
-        # User ID = powiazany
+        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -313,7 +313,7 @@ class BinanceReportParser:
                 email = extract_email(v)
                 if email:
                     self.identifiers.emails.add(email)
-        # User Id = powiazany
+        # User Id = powiązany
         if "User Id" in df.columns:
             for v in df["User Id"].dropna():
                 v = clean_val(v)
@@ -331,7 +331,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # User Id = powiazany
+        # User Id = powiązany
         if "User Id" in df.columns:
             for v in df["User Id"].dropna():
                 v = clean_val(v)
@@ -354,7 +354,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.transaction_ids.add(v)
-        # User ID = powiazany
+        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -367,7 +367,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # Target UID = powiazany uzytkownik
+        # Target UID = powiązany użytkownik
         if "Target UID" in df.columns:
             for v in df["Target UID"].dropna():
                 v = clean_val(v)
@@ -380,7 +380,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # UserId = powiazany
+        # UserId = powiązany
         if "UserId" in df.columns:
             for v in df["UserId"].dropna():
                 v = clean_val(v)
@@ -399,7 +399,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.transaction_ids.add(v)
-        # User ID = powiazany
+        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
@@ -412,7 +412,7 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.order_ids.add(v)
-        # User ID = powiazany
+        # User ID = powiązany
         if "User ID" in df.columns:
             for v in df["User ID"].dropna():
                 v = clean_val(v)
