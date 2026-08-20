@@ -330,17 +330,19 @@ class ReportGenerator:
                 "Szczegoly transakcji ponizej.",
                 color=RGBColor(0x80, 0x60, 0x00))
 
-        # Szczegoly transakcji — kompaktowa tabela
+        # Szczegoly transakcji — tylko potwierdzone, wszystkie wiersze, najstarsze na gorze
+        confirmed = [t for t in transactions if not _is_pending_transaction(t)]
+        pending_count = len(transactions) - len(confirmed)
+        self._add_paragraph(f"Szczegoly transakcji ({len(confirmed)} potwierdzonych, pominięto {pending_count} pending):", bold=True)
         txn_rows = []
-        for t in transactions[:30]:
-            # Kolorujemy zmiane: + na zielono, - na czerwono — w DOCX nie mozemy kolorowac komorek latwo,
-            # wiec dodajemy strzalke
+        # Sortujemy po czasie — najstarsze na gorze
+        for t in sorted(confirmed, key=lambda x: x.time or ""):
             chg = _to_float(t.change)
             chg_str = t.change
             if chg > 0:
                 chg_str = f"+{t.change}"
             txn_rows.append([
-                t.time[:19] if t.time else "",  # skracamy czas
+                t.time[:19] if t.time else "",
                 t.currency,
                 chg_str,
                 t.reason if t.reason else "—",
@@ -348,9 +350,7 @@ class ReportGenerator:
             ])
         self._add_table(
             ["Czas", "Waluta", "Zmiana", "Powod", "TxID"],
-            txn_rows, max_rows=30)
-        if len(transactions) > 30:
-            self._add_paragraph(f"... oraz {len(transactions) - 30} kolejnych transakcji (pelna lista w JSON).")
+            txn_rows)
 
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
         # ===== STRONA TYTULOWA =====
