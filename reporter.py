@@ -311,7 +311,7 @@ class ReportGenerator:
         def fmt(v):
             if abs(v) < 1e-12:
                 return "0"
-            s = f"{v:.10f}".rstrip("0").rstrip(".")
+            s = f"{abs(v):.10f}".rstrip("0").rstrip(".")
             if s.startswith("."):
                 s = "0" + s
             return s
@@ -343,21 +343,22 @@ class ReportGenerator:
             # Podsumowanie waluty — 1 wiersz
             self._add_paragraph(f"Waluta {curr}:", bold=True)
             summary_row = [[
-                fmt_signed(data["in"]),
-                fmt_signed(-data["out"]),
+                f"+{fmt(data['in'])}",
+                f"-{fmt(data['out'])}",
                 fmt_signed(netto),
                 str(data["count_in"]),
                 str(data["count_out"]),
             ]]
             self._add_table(
-                ["Przychody", "Rozchody", "Netto", "L. przych.", "L. rozch."],
+                ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
                 summary_row)
 
-            # Szczegoly transakcji dla tej waluty
+            # Szczegoly transakcji dla tej waluty (pomijamy zmiana = 0)
             curr_txns = txns_by_currency.get(curr, [])
-            if curr_txns:
+            nonzero_txns = [t for t in curr_txns if abs(_to_float(t.change)) > 1e-12]
+            if nonzero_txns:
                 txn_rows = []
-                for t in curr_txns:
+                for t in nonzero_txns:
                     chg = _to_float(t.change)
                     chg_str = fmt_signed(chg)
                     txn_rows.append([
