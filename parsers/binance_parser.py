@@ -262,9 +262,11 @@ class BinanceReportParser:
         for idx, c in enumerate(cols):
             if "time" in c or "date" in c:
                 col_map["time"] = idx
-            elif c == "currency" or "asset" in c:
+            elif c == "currency" or c == "asset" or "currency" in c:
                 col_map["currency"] = idx
-            elif "amount" in c and "change" not in c:
+            elif "change" in c:
+                col_map["change"] = idx
+            elif "amount" in c:
                 col_map["amount"] = idx
             elif "locked" in c:
                 col_map["locked"] = idx
@@ -272,14 +274,19 @@ class BinanceReportParser:
                 col_map["freeze"] = idx
             elif "processing" in c:
                 col_map["processing"] = idx
-            elif "change" in c:
-                col_map["change"] = idx
             elif "reason" in c or "type" in c or "operation" in c:
                 col_map["reason"] = idx
             elif "transaction id" in c or "txid" in c or "tx id" in c:
                 col_map["transaction_id"] = idx
 
+        print(f"    Kolumny Asset Log ({wallet_type}): {list(col_map.keys())}")
+
         for _, row in df.iterrows():
+            # Change jest kluczowy — jeśli nie ma, próbujemy Amount jako fallback
+            chg_val = clean_val(row.iloc[col_map.get("change", 0)]) if "change" in col_map else None
+            if chg_val is None:
+                chg_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
+
             txn = AssetTransaction(
                 time=str(clean_val(row.iloc[col_map.get("time", 0)])) if "time" in col_map else "",
                 currency=str(clean_val(row.iloc[col_map.get("currency", 0)])) if "currency" in col_map else "",
@@ -287,7 +294,7 @@ class BinanceReportParser:
                 locked=_fmt_num(clean_val(row.iloc[col_map.get("locked", 0)])) if "locked" in col_map else "",
                 freeze=_fmt_num(clean_val(row.iloc[col_map.get("freeze", 0)])) if "freeze" in col_map else "",
                 processing=_fmt_num(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
-                change=_fmt_num(clean_val(row.iloc[col_map.get("change", 0)])) if "change" in col_map else "",
+                change=_fmt_num(chg_val) if chg_val else "",
                 reason=str(clean_val(row.iloc[col_map.get("reason", 0)])) if "reason" in col_map else "",
                 transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
                 wallet_type=wallet_type,

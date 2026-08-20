@@ -44,20 +44,23 @@ def _to_float(val: str) -> float:
 
 
 def _sum_asset_flow(transactions: List[AssetTransaction]) -> Dict[str, Dict[str, float]]:
-    """Podsumowanie przeplywow per waluta: przychody, rozchody, netto."""
+    """Podsumowanie przeplywow per waluta: przychody, rozchody, netto.
+    Zwraca tylko waluty z niezerowym przeplywem."""
     result = {}
     for t in transactions:
         curr = t.currency.upper() if t.currency else "UNKNOWN"
         if curr not in result:
             result[curr] = {"in": 0.0, "out": 0.0, "count_in": 0, "count_out": 0}
         chg = _to_float(t.change)
-        if chg > 0:
+        if chg > 1e-12:
             result[curr]["in"] += chg
             result[curr]["count_in"] += 1
-        elif chg < 0:
+        elif chg < -1e-12:
             result[curr]["out"] += abs(chg)
             result[curr]["count_out"] += 1
-    return result
+
+    # Usun waluty z zerowym przeplywem
+    return {k: v for k, v in result.items() if v["in"] > 1e-12 or v["out"] > 1e-12}
 
 
 class ReportGenerator:
@@ -266,20 +269,31 @@ class ReportGenerator:
             flow_rows = []
             for curr, data in sorted(flow.items()):
                 netto = data["in"] - data["out"]
+                def fmt(v):
+                    if abs(v) < 1e-12:
+                        return "0"
+                    s = f"{v:.10f}".rstrip("0").rstrip(".")
+                    if s.startswith("."):
+                        s = "0" + s
+                    return s
                 flow_rows.append([
                     curr,
-                    f"+{data['in']:.8f}".rstrip("0").rstrip("."),
-                    f"-{data['out']:.8f}".rstrip("0").rstrip("."),
-                    f"{netto:+.8f}".rstrip("0").rstrip("."),
+                    f"+{fmt(data['in'])}",
+                    f"-{fmt(data['out'])}",
+                    f"{'+' if netto >= 0 else ''}{fmt(netto)}",
                     str(data["count_in"]),
                     str(data["count_out"]),
                 ])
             self._add_table(
                 ["Waluta", "Przychody", "Rozchody", "Netto", "L. przych.", "L. rozch."],
                 flow_rows, max_rows=50)
+        else:
+            self._add_paragraph(
+                "Brak wykrytych przeplywow (kolumna Change/Amount moze byc pusta lub zawierac same zera). "
+                "Szczegoly transakcji ponizej.",
+                color=RGBColor(0x80, 0x60, 0x00))
 
         # Szczegoly transakcji — kompaktowa tabela
-        self._add_paragraph(f"Szczegoly transakcji ({len(transactions)} lacznie):", bold=True)
         txn_rows = []
         for t in transactions[:30]:
             # Kolorujemy zmiane: + na zielono, - na czerwono — w DOCX nie mozemy kolorowac komorek latwo,
