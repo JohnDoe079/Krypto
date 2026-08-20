@@ -285,7 +285,16 @@ class BinanceReportParser:
             # Change jest kluczowy — jeśli nie ma, próbujemy Amount jako fallback
             chg_val = clean_val(row.iloc[col_map.get("change", 0)]) if "change" in col_map else None
             if chg_val is None:
-                chg_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
+                amt_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
+                if amt_val:
+                    # Nadajemy znak na podstawie Reason (Amount moze byc bez znaku)
+                    reason = str(clean_val(row.iloc[col_map.get("reason", 0)])).lower() if "reason" in col_map else ""
+                    if any(kw in reason for kw in ["withdrawal", "send", "out", "fee", "sell"]):
+                        chg_val = f"-{amt_val}"
+                    elif any(kw in reason for kw in ["deposit", "receive", "in", "buy", "reward", "staking", "airdrop"]):
+                        chg_val = f"+{amt_val}"
+                    else:
+                        chg_val = amt_val  # nie wiemy, zostawiamy jak jest
 
             txn = AssetTransaction(
                 time=str(clean_val(row.iloc[col_map.get("time", 0)])) if "time" in col_map else "",

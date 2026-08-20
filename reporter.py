@@ -335,6 +335,13 @@ class ReportGenerator:
                 color=RGBColor(0x80, 0x60, 0x00))
             return
 
+        # Notka wyjasniajaca
+        self._add_paragraph(
+            "Uwaga: Saldo ponizej to BILANS ZMIAN w okresie raportu (przychody minus rozchody). "
+            "Jezeli saldo jest ujemne, oznacza to ze w okresie raportu rozchody przewyzszyly przychody. "
+            "Poczatkowe zasilenie (depozyty, transfery) moze byc w osobnych arkuszach (Deposit History, Wallet Transfer).",
+            color=RGBColor(0x60, 0x60, 0x60))
+
         # Dla kazdej waluty: podsumowanie (1 wiersz) + szczegoly transakcji
         for curr in sorted(flow.keys()):
             data = flow[curr]
@@ -352,6 +359,15 @@ class ReportGenerator:
             self._add_table(
                 ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
                 summary_row)
+
+            # Flaga dla ujemnego salda
+            if netto < -1e-12:
+                self._add_paragraph(
+                    f"    ⚠️ UWAGA: Ujemne saldo {curr} ({fmt_signed(netto)}). "
+                    f"Rozchody przewyzszyly przychody o {fmt(abs(netto))} {curr}. "
+                    "Prawdopodobne przyczyny: (1) depozyt z zewnatrz w 'Deposit History', "
+                    "(2) transfer z innego portfela (Funding/Spot), (3) poczatkowe saldo przed pierwsza data w logu.",
+                    color=RGBColor(0xC0, 0x00, 0x00))
 
             # Szczegoly transakcji dla tej waluty (pomijamy zmiana = 0)
             curr_txns = txns_by_currency.get(curr, [])
