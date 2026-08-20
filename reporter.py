@@ -148,7 +148,7 @@ class ReportGenerator:
             run.font.color.rgb = color
         return p
 
-    def _add_table(self, headers: List[str], rows: List[List[str]], max_rows: int = 100):
+    def _add_table(self, headers: List[str], rows: List[List[str]], max_rows: int = None):
         if not rows:
             self._add_paragraph("(brak danych)")
             return None
@@ -176,7 +176,9 @@ class ReportGenerator:
             shading_elm = parse_xml(r'<w:shd {} w:fill="1F4E78"/>'.format(nsdecls('w')))
             hdr_cells[i]._tc.get_or_add_tcPr().append(shading_elm)
 
-        for row_data in rows[:max_rows]:
+        # Jezeli max_rows jest None — pokazujemy wszystko
+        limit = max_rows if max_rows is not None else len(rows)
+        for row_data in rows[:limit]:
             row_cells = table.add_row().cells
             for i, cell_text in enumerate(row_data):
                 txt = str(cell_text) if cell_text is not None else ""
@@ -185,7 +187,7 @@ class ReportGenerator:
                     for run in paragraph.runs:
                         run.font.size = Pt(9)
 
-        if len(rows) > max_rows:
+        if max_rows is not None and len(rows) > max_rows:
             self._add_paragraph(f" ... i {len(rows) - max_rows} wiecej wierszy")
         return table
 
