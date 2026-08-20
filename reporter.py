@@ -299,58 +299,77 @@ class ReportGenerator:
             "Szczegoly wpłat/wypłat (adresy, TXID) znajduja sie w 'Deposit/Withdrawal History'.",
             color=RGBColor(0x60, 0x60, 0x60))
 
-        # Podsumowanie per waluta
-        flow = _sum_asset_flow(transactions)
-        if flow:
-            self._add_paragraph("Podsumowanie przeplywow per waluta:", bold=True)
-            flow_rows = []
-            for curr, data in sorted(flow.items()):
-                netto = data["in"] - data["out"]
-                def fmt(v):
-                    if abs(v) < 1e-12:
-                        return "0"
-                    s = f"{v:.10f}".rstrip("0").rstrip(".")
-                    if s.startswith("."):
-                        s = "0" + s
-                    return s
-                flow_rows.append([
-                    curr,
-                    f"+{fmt(data['in'])}",
-                    f"-{fmt(data['out'])}",
-                    f"{'+' if netto >= 0 else ''}{fmt(netto)}",
-                    str(data["count_in"]),
-                    str(data["count_out"]),
-                ])
-            self._add_table(
-                ["Waluta", "Przychody", "Rozchody", "Netto", "L. przych.", "L. rozch."],
-                flow_rows, max_rows=50)
-        else:
-            self._add_paragraph(
-                "Brak wykrytych przeplywow (kolumna Change/Amount moze byc pusta lub zawierac same zera). "
-                "Szczegoly transakcji ponizej.",
-                color=RGBColor(0x80, 0x60, 0x00))
-
-        # Szczegoly transakcji — tylko potwierdzone, wszystkie wiersze, najstarsze na gorze
+        # Tylko potwierdzone transakcje
         confirmed = [t for t in transactions if not _is_pending_transaction(t)]
         pending_count = len(transactions) - len(confirmed)
-        self._add_paragraph(f"Szczegoly transakcji ({len(confirmed)} potwierdzonych, pominięto {pending_count} pending):", bold=True)
-        txn_rows = []
-        # Sortujemy po czasie — najstarsze na gorze
+        if pending_count > 0:
+            self._add_paragraph(f"Pominięto {pending_count} transakcji pending/niepotwierdzonych.", color=RGBColor(0x80, 0x60, 0x00))
+
+        # Podsumowanie per waluta
+        flow = _sum_asset_flow(confirmed)
+
+        def fmt(v):
+            if abs(v) < 1e-12:
+                return "0"
+            s = f"{v:.10f}".rstrip("0").rstrip(".")
+            if s.startswith("."):
+                s = "0" + s
+            return s
+        def fmt_signed(v):
+            if abs(v) < 1e-12:
+                return "0"
+            s = fmt(v)
+            return f"+{s}" if v > 0 else f"-{s}"
+
+        # Grupujemy transakcje per waluta
+        txns_by_currency = {}
         for t in sorted(confirmed, key=lambda x: x.time or ""):
-            chg = _to_float(t.change)
-            chg_str = t.change
-            if chg > 0:
-                chg_str = f"+{t.change}"
-            txn_rows.append([
-                t.time[:19] if t.time else "",
-                t.currency,
-                chg_str,
-                t.reason if t.reason else "—",
-                t.transaction_id[:20] if t.transaction_id else "—",
-            ])
-        self._add_table(
-            ["Czas", "Waluta", "Zmiana", "Powod", "TxID"],
-            txn_rows)
+            curr = t.currency.upper() if t.currency else "UNKNOWN"
+            if curr not in txns_by_currency:
+                txns_by_currency[curr] = []
+            txns_by_currency[curr].append(t)
+
+        if not flow:
+            self._add_paragraph(
+                "Brak wykrytych przeplywow (kolumna Change/Amount moze byc pusta lub zawierac same zera).",
+                color=RGBColor(0x80, 0x60, 0x00))
+            return
+
+        # Dla kazdej waluty: podsumowanie (1 wiersz) + szczegoly transakcji
+        for curr in sorted(flow.keys()):
+            data = flow[curr]
+            netto = data["in"] - data["out"]
+
+            # Podsumowanie waluty — 1 wiersz
+            self._add_paragraph(f"Waluta {curr}:", bold=True)
+            summary_row = [[
+                fmt_signed(data["in"]),
+                fmt_signed(-data["out"]),
+                fmt_signed(netto),
+                str(data["count_in"]),
+                str(data["count_out"]),
+            ]]
+            self._add_table(
+                ["Przychody", "Rozchody", "Netto", "L. przych.", "L. rozch."],
+                summary_row)
+
+            # Szczegoly transakcji dla tej waluty
+            curr_txns = txns_by_currency.get(curr, [])
+            if curr_txns:
+                txn_rows = []
+                for t in curr_txns:
+                    chg = _to_float(t.change)
+                    chg_str = fmt_signed(chg)
+                    txn_rows.append([
+                        t.time[:19] if t.time else "",
+                        chg_str,
+                        t.reason if t.reason else "—",
+                        t.transaction_id[:20] if t.transaction_id else "—",
+                    ])
+                self._add_table(
+                    ["Czas", "Zmiana", "Powod", "TxID"],
+                    txn_rows)
+            self._add_paragraph("")  # odstep miedzy walutami
 
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
         # ===== STRONA TYTULOWA =====
