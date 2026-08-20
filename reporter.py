@@ -13,7 +13,6 @@ from docx.oxml import parse_xml
 from models.schemas import ExtractedIdentifiers
 from matcher import ReportComparator
 
-# Tlumaczenia sekcji Customer Information
 SECTION_TRANSLATIONS = {
     "Basic Information": "Basic Information (Podstawowe informacje)",
     "API Information": "API Information (Informacje API)",
@@ -25,7 +24,6 @@ SECTION_TRANSLATIONS = {
     "Sub-accounts": "Sub-accounts (Subkonta)",
 }
 
-# Kolejnosc wierszy w Basic Information
 BASIC_INFO_ORDER = [
     "Registration time", "User ID", "User authentication type",
     "User authentication time", "User nationality", "User ID number",
@@ -95,7 +93,6 @@ class ReportGenerator:
         for i in range(n_cols):
             table.columns[i].width = col_width
 
-        # Naglowki
         hdr_cells = table.rows[0].cells
         for i, h in enumerate(headers):
             hdr_cells[i].text = h
@@ -108,7 +105,6 @@ class ReportGenerator:
             shading_elm = parse_xml(r'<w:shd {} w:fill="1F4E78"/>'.format(nsdecls('w')))
             hdr_cells[i]._tc.get_or_add_tcPr().append(shading_elm)
 
-        # Wiersze
         for row_data in rows[:max_rows]:
             row_cells = table.add_row().cells
             for i, cell_text in enumerate(row_data):
@@ -139,6 +135,122 @@ class ReportGenerator:
                  for col, val in rest]
         return rows
 
+    def _render_customer_info(self, r: ExtractedIdentifiers):
+        if not r.customer_info_sections:
+            return
+        self._add_heading("Customer Information (Informacje o uzytkowniku)", level=3)
+        for sec_name, data in r.customer_info_sections.items():
+            if not data:
+                continue
+            display_name = SECTION_TRANSLATIONS.get(sec_name, sec_name)
+            self._add_heading(display_name, level=4)
+            if sec_name == "Basic Information":
+                rows = self._sort_basic_info(data)
+            else:
+                rows = []
+                for col, val in data.items():
+                    if val is not None and str(val).strip() != "":
+                        rows.append([str(col), str(val)])
+                    else:
+                        rows.append([str(col), "(puste)"])
+            self._add_table(["Pole", "Wartosc"], rows, max_rows=100)
+
+    def _render_kyc(self, r: ExtractedIdentifiers):
+        self._add_heading("KYC Documents (Dokumenty KYC)", level=3)
+        if r.kyc_images:
+            n_cols = 2
+            n_rows = (len(r.kyc_images) + n_cols - 1) // n_cols
+            table = self.doc.add_table(rows=n_rows, cols=n_cols)
+            table.style = 'Table Grid'
+            table.alignment = WD_TABLE_ALIGNMENT.LEFT
+            table.autofit = False
+            table.allow_autofit = False
+            col_w = Inches(PAGE_WIDTH_INCHES / n_cols)
+            for i in range(n_cols):
+                table.columns[i].width = col_w
+            for img_idx, img_path in enumerate(r.kyc_images):
+                row_idx = img_idx // n_cols
+                col_idx = img_idx % n_cols
+                cell = table.cell(row_idx, col_idx)
+                cell.text = ""
+                if os.path.exists(img_path):
+                    try:
+                        p = cell.paragraphs[0]
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run = p.add_run()
+                        run.add_picture(img_path, width=Inches(2.8))
+                    except Exception as e:
+                        cell.text = f"[!] Blad: {e}"
+                else:
+                    cell.text = "Brak pliku"
+        else:
+            self._add_paragraph("Brak osadzonych obrazkow w arkuszu KYC Documents.")
+
+    def _render_assets_overview(self, r: ExtractedIdentifiers):
+        self._add_heading("Assets Overview (Przeglad aktywow)", level=3)
+        if r.estimate_total_btc:
+            self._add_paragraph(f"Estimate Total Balance (BTC): {r.estimate_total_btc}", bold=True)
+        if r.asset_balances:
+            bal_rows = []
+            for b in r.asset_balances:
+                bal_rows.append([
+                    b.currency_code,
+                    b.currency_name if b.currency_name else "—",
+                    b.all_positions,
+                    b.available_positions,
+                    b.btc_equivalent,
+                    b.usdt_equivalent,
+                    b.wallet_type,
+                ])
+            self._add_table(
+                ["Kod", "Nazwa", "Wszystkie", "Dostepne", "BTC Eq.", "USDT Eq.", "Portfel"],
+                bal_rows, max_rows=100)
+        else:
+            self._add_paragraph("Brak danych o saldach walut (wszystkie salda to 0 lub arkusz nie zawiera tabeli).")
+
+    def _render_spot_asset_log(self, r: ExtractedIdentifiers):
+        if not r.spot_transactions:
+            return
+        self._add_heading("Spot Asset Log (Historia ruchow Spot)", level=3)
+        self._add_paragraph(f"Liczba transakcji Spot: {len(r.spot_transactions)}")
+        txn_rows = []
+        for t in r.spot_transactions[:50]:
+            txn_rows.append([
+                t.time, t.currency, t.amount, t.change,
+                t.locked, t.freeze, t.processing, t.reason,
+            ])
+        self._add_table(
+            ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
+            txn_rows, max_rows=50)
+        if len(r.spot_transactions) > 50:
+            self._add_paragraph(f"... oraz {len(r.spot_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
+
+    def _render_funding_asset_log(self, r: ExtractedIdentifiers):
+        if not r.funding_transactions:
+            return
+        self._add_heading("Funding Asset Log (Historia ruchow Funding)", level=3)
+        self._add_paragraph(f"Liczba transakcji Funding: {len(r.funding_transactions)}")
+        txn_rows = []
+        for t in r.funding_transactions[:50]:
+            txn_rows.append([
+                t.time, t.currency, t.amount, t.change,
+                t.locked, t.freeze, t.processing, t.reason,
+            ])
+        self._add_table(
+            ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
+            txn_rows, max_rows=50)
+        if len(r.funding_transactions) > 50:
+            self._add_paragraph(f"... oraz {len(r.funding_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
+
+    def _render_time_ranges(self, r: ExtractedIdentifiers):
+        if not r.time_ranges:
+            return
+        self._add_heading("Zakresy czasowe per arkusz", level=3)
+        time_rows = []
+        for sheet_name, tr in sorted(r.time_ranges.items()):
+            time_rows.append([sheet_name, tr.get("from", ""), tr.get("to", "")])
+        self._add_table(["Arkusz", "Od", "Do"], time_rows, max_rows=50)
+
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
         # ===== STRONA TYTULOWA =====
         self.doc.add_paragraph()
@@ -164,19 +276,14 @@ class ReportGenerator:
 
         # ===== SPIS TRESCI =====
         self._add_heading("Spis tresci", level=1)
-        toc_items = [
-            "1. Podsumowanie",
-            "2. Szczegolowa analiza poszczegolnych plikow",
-        ]
+        toc_items = ["1. Podsumowanie", "2. Szczegolowa analiza poszczegolnych plikow"]
         for i, r in enumerate(reports, 1):
             toc_items.append(f"  2.{i}. {r.source_file}")
         if len(reports) >= 2:
             toc_items.append("3. Porownanie miedzy raportami")
         toc_items.append("4. Pelna lista identyfikatorow")
-
         for item in toc_items:
             self.doc.add_paragraph(item, style='List Bullet')
-
         self.doc.add_page_break()
 
         # ===== 1. PODSUMOWANIE =====
@@ -194,28 +301,18 @@ class ReportGenerator:
             time_summary = ""
             if all_from and all_to:
                 time_summary = f"{min(all_from)} -> {max(all_to)}"
-
             summary_rows.append([
-                r.source_file,
-                r.exchange.upper(),
-                str(len(r.parsed_sheets)),
+                r.source_file, r.exchange.upper(), str(len(r.parsed_sheets)),
                 ", ".join(sorted(r.user_ids)) if r.user_ids else "(brak)",
-                str(len(r.related_user_ids)),
-                str(len(r.emails)),
-                str(len(r.ips)),
-                str(len(r.wallet_addresses)),
-                str(len(r.txids)),
+                str(len(r.related_user_ids)), str(len(r.emails)),
+                str(len(r.ips)), str(len(r.wallet_addresses)), str(len(r.txids)),
                 r.estimate_total_btc if r.estimate_total_btc else "(brak)",
-                str(len(r.asset_balances)),
-                time_summary,
+                str(len(r.asset_balances)), time_summary,
             ])
-
         self._add_table(
             ["Plik", "Gielda", "Arkusze", "ID wlasciciela", "ID powiazanych",
              "E-maile", "IP", "Portfele", "TXID", "Est. Total BTC", "Salda", "Zakres czasowy"],
-            summary_rows
-        )
-
+            summary_rows)
         self.doc.add_page_break()
 
         # ===== 2. SZCZEGOLY KAZDEGO PLIKU =====
@@ -231,135 +328,22 @@ class ReportGenerator:
                     f"Nieznane arkusze: {', '.join(r.unknown_sheets)}",
                     color=RGBColor(0xC0, 0x00, 0x00))
 
-            # --- ZAKRESY CZASOWE ---
-            if r.time_ranges:
-                self._add_heading("Zakresy czasowe per arkusz", level=3)
-                time_rows = []
-                for sheet_name, tr in sorted(r.time_ranges.items()):
-                    time_rows.append([sheet_name, tr.get("from", ""), tr.get("to", "")])
-                self._add_table(["Arkusz", "Od", "Do"], time_rows, max_rows=50)
+            # Renderujemy w kolejnosci parsed_sheets (tak jak w Excelu)
+            for sheet_name in r.parsed_sheets:
+                if sheet_name == "Customer Information":
+                    self._render_customer_info(r)
+                elif sheet_name == "KYC Documents":
+                    self._render_kyc(r)
+                elif sheet_name == "Assets Overview":
+                    self._render_assets_overview(r)
+                elif sheet_name == "Spot Asset Log":
+                    self._render_spot_asset_log(r)
+                elif sheet_name == "Funding Asset Log":
+                    self._render_funding_asset_log(r)
+                # Inne arkusze beda dodawane pozniej
 
-            # --- ASSETS OVERVIEW ---
-            if "Assets Overview" in r.parsed_sheets:
-                self._add_heading("Assets Overview (Przeglad aktywow)", level=3)
-                if r.estimate_total_btc:
-                    self._add_paragraph(
-                        f"Estimate Total Balance (BTC): {r.estimate_total_btc}", bold=True)
-                if r.asset_balances:
-                    bal_rows = []
-                    for b in r.asset_balances:
-                        bal_rows.append([
-                            b.currency_code,
-                            b.currency_name,
-                            b.all_positions,
-                            b.available_positions,
-                            b.btc_equivalent,
-                            b.usdt_equivalent,
-                            b.wallet_type,
-                        ])
-                    self._add_table(
-                        ["Kod", "Nazwa", "Wszystkie", "Dostepne", "BTC Eq.", "USDT Eq.", "Portfel"],
-                        bal_rows, max_rows=100)
-                else:
-                    self._add_paragraph("Brak danych o saldach walut.")
-
-            # --- SPOT ASSET LOG ---
-            if r.spot_transactions:
-                self._add_heading("Spot Asset Log (Historia ruchow Spot)", level=3)
-                self._add_paragraph(f"Liczba transakcji Spot: {len(r.spot_transactions)}")
-                txn_rows = []
-                for t in r.spot_transactions[:50]:  # max 50 w raporcie
-                    txn_rows.append([
-                        t.time,
-                        t.currency,
-                        t.amount,
-                        t.change,
-                        t.locked,
-                        t.freeze,
-                        t.processing,
-                        t.reason,
-                    ])
-                self._add_table(
-                    ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
-                    txn_rows, max_rows=50)
-                if len(r.spot_transactions) > 50:
-                    self._add_paragraph(f"... oraz {len(r.spot_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
-
-            # --- FUNDING ASSET LOG ---
-            if r.funding_transactions:
-                self._add_heading("Funding Asset Log (Historia ruchow Funding)", level=3)
-                self._add_paragraph(f"Liczba transakcji Funding: {len(r.funding_transactions)}")
-                txn_rows = []
-                for t in r.funding_transactions[:50]:
-                    txn_rows.append([
-                        t.time,
-                        t.currency,
-                        t.amount,
-                        t.change,
-                        t.locked,
-                        t.freeze,
-                        t.processing,
-                        t.reason,
-                    ])
-                self._add_table(
-                    ["Czas", "Waluta", "Ilosc", "Zmiana", "Zablokowane", "Freeze", "Processing", "Powod"],
-                    txn_rows, max_rows=50)
-                if len(r.funding_transactions) > 50:
-                    self._add_paragraph(f"... oraz {len(r.funding_transactions) - 50} kolejnych transakcji (pelna lista w JSON).")
-
-            # --- CUSTOMER INFORMATION ---
-            if r.customer_info_sections:
-                self._add_heading("Customer Information (Informacje o uzytkowniku)", level=3)
-                for sec_name, data in r.customer_info_sections.items():
-                    if not data:
-                        continue
-                    display_name = SECTION_TRANSLATIONS.get(sec_name, sec_name)
-                    self._add_heading(display_name, level=4)
-
-                    if sec_name == "Basic Information":
-                        rows = self._sort_basic_info(data)
-                    else:
-                        rows = []
-                        for col, val in data.items():
-                            if val is not None and str(val).strip() != "":
-                                rows.append([str(col), str(val)])
-                            else:
-                                rows.append([str(col), "(puste)"])
-                    self._add_table(["Pole", "Wartosc"], rows, max_rows=100)
-
-            # --- KYC DOCUMENTS ---
-            if "KYC Documents" in r.parsed_sheets:
-                self._add_heading("KYC Documents (Dokumenty KYC)", level=3)
-                if r.kyc_images:
-                    n_cols = 2
-                    n_rows = (len(r.kyc_images) + n_cols - 1) // n_cols
-                    table = self.doc.add_table(rows=n_rows, cols=n_cols)
-                    table.style = 'Table Grid'
-                    table.alignment = WD_TABLE_ALIGNMENT.LEFT
-                    table.autofit = False
-                    table.allow_autofit = False
-                    col_w = Inches(PAGE_WIDTH_INCHES / n_cols)
-                    for i in range(n_cols):
-                        table.columns[i].width = col_w
-
-                    for img_idx, img_path in enumerate(r.kyc_images):
-                        row_idx = img_idx // n_cols
-                        col_idx = img_idx % n_cols
-                        cell = table.cell(row_idx, col_idx)
-                        cell.text = ""
-                        if os.path.exists(img_path):
-                            try:
-                                p = cell.paragraphs[0]
-                                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                                run = p.add_run()
-                                run.add_picture(img_path, width=Inches(2.8))
-                            except Exception as e:
-                                cell.text = f"[!] Blad: {e}"
-                        else:
-                            cell.text = "Brak pliku"
-                else:
-                    self._add_paragraph("Brak osadzonych obrazkow w arkuszu KYC Documents.")
-
+            # Zakresy czasowe na koncu sekcji pliku
+            self._render_time_ranges(r)
             self.doc.add_page_break()
 
         # ===== 3. POROWNANIE =====
@@ -367,16 +351,13 @@ class ReportGenerator:
             self._add_heading("3. Porownanie miedzy raportami", level=1)
             comp = ReportComparator(reports)
             result = comp.compare()
-
             common = result.get("common", {})
             if common:
                 self._add_heading("Wspolne identyfikatory (potencjalne powiazania):", level=2)
                 self._add_paragraph(
                     "Ponizsze identyfikatory wystepuja w co najmniej dwoch raportach. "
                     "Moga wskazywac na powiazanie miedzy kontami.",
-                    color=RGBColor(0xC0, 0x00, 0x00)
-                )
-
+                    color=RGBColor(0xC0, 0x00, 0x00))
                 for field_name, entries in common.items():
                     self._add_heading(f"[{field_name}] — {len(entries)} wspolnych", level=3)
                     rows = []
@@ -386,61 +367,42 @@ class ReportGenerator:
                         if "time_context" in e:
                             parts = []
                             for tc in e["time_context"]:
-                                file_short = tc["file"]
-                                ranges = tc["ranges"]
-                                if ranges:
-                                    parts.append(f"{file_short}: {ranges[0]}")
+                                if tc["ranges"]:
+                                    parts.append(f"{tc['file']}: {tc['ranges'][0]}")
                             time_str = "; ".join(parts)
                         rows.append([str(i+1), str(e["value"]), files_str, time_str])
                     self._add_table(["Lp.", "Wartosc", "Pliki", "Zakres czasowy"], rows, max_rows=30)
             else:
                 self._add_paragraph("Nie znaleziono wspolnych identyfikatorow miedzy raportami.")
-
             self.doc.add_page_break()
 
         # ===== 4. PELNA LISTA IDENTYFIKATOROW =====
         self._add_heading("4. Pelna lista identyfikatorow", level=1)
-        self._add_paragraph(
-            "Szczegolowe dane w formacie JSON zostaly zapisane w pliku parsed_report.json.")
+        self._add_paragraph("Szczegolowe dane w formacie JSON zostaly zapisane w pliku parsed_report.json.")
 
         for r in reports:
             self._add_heading(f"{r.source_file}", level=2)
-
             if r.user_ids:
                 self._add_paragraph(f"ID wlasciciela konta ({len(r.user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.user_ids))]
                 self._add_table(["Lp.", "Wartosc"], rows, max_rows=20)
-
             if r.related_user_ids:
-                self._add_paragraph(
-                    f"ID powiazanych uzytkownikow (z P2P, Pay, itp.) ({len(r.related_user_ids)}):",
-                    bold=True)
+                self._add_paragraph(f"ID powiazanych uzytkownikow ({len(r.related_user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.related_user_ids))]
                 self._add_table(["Lp.", "Wartosc"], rows, max_rows=20)
 
             id_sections = [
-                ("E-maile", r.emails),
-                ("Numery telefonow", r.phones),
-                ("Adresy IP", r.ips),
-                ("Adresy portfeli (krypto)", r.wallet_addresses),
-                ("TXID (hash transakcji)", r.txids),
-                ("BIN karty", r.card_bins),
-                ("Ostatnie 4 cyfry karty", r.card_last4),
-                ("IBAN", r.ibans),
-                ("Numery kont", r.account_numbers),
-                ("ID urzadzen", r.device_ids),
-                ("ID Fvideo", r.fvideo_ids),
-                ("UUID BNC", r.bnc_uuids),
-                ("ID zamowien", r.order_ids),
-                ("ID kontrahentow", r.counterparty_ids),
-                ("ID transakcji", r.transaction_ids),
-                ("Imiona i nazwiska", r.names),
-                ("Narodowosci", r.nationalities),
-                ("Numery dokumentow tozsamosci", r.id_numbers),
-                ("Lokalizacje GEO", r.geolocations),
-                ("Przegladarki / User Agent", r.browsers),
+                ("E-maile", r.emails), ("Numery telefonow", r.phones),
+                ("Adresy IP", r.ips), ("Adresy portfeli (krypto)", r.wallet_addresses),
+                ("TXID (hash transakcji)", r.txids), ("BIN karty", r.card_bins),
+                ("Ostatnie 4 cyfry karty", r.card_last4), ("IBAN", r.ibans),
+                ("Numery kont", r.account_numbers), ("ID urzadzen", r.device_ids),
+                ("ID Fvideo", r.fvideo_ids), ("UUID BNC", r.bnc_uuids),
+                ("ID zamowien", r.order_ids), ("ID kontrahentow", r.counterparty_ids),
+                ("ID transakcji", r.transaction_ids), ("Imiona i nazwiska", r.names),
+                ("Narodowosci", r.nationalities), ("Numery dokumentow tozsamosci", r.id_numbers),
+                ("Lokalizacje GEO", r.geolocations), ("Przegladarki / User Agent", r.browsers),
             ]
-
             for title, items in id_sections:
                 if items:
                     self._add_paragraph(f"{title} ({len(items)}):", bold=True)

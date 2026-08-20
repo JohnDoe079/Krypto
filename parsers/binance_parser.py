@@ -21,6 +21,32 @@ from models.schemas import (
 from config import BINANCE_SHEETS
 
 
+def _fmt_num(val) -> str:
+    """Formatuje liczbe bez notacji naukowej, usuwa niepotrzebne zera."""
+    if val is None or val == "":
+        return ""
+    try:
+        f = float(val)
+        # Jezeli to liczba calkowita
+        if f == int(f):
+            return str(int(f))
+        # Formatujemy z max 8 miejsc po przecinku, usuwamy zera na koncu
+        s = f"{f:.10f}".rstrip("0").rstrip(".")
+        return s
+    except (ValueError, TypeError):
+        return str(val).strip()
+
+
+def _is_zero(val) -> bool:
+    """Sprawdza czy wartosc to zero lub puste."""
+    if val is None or val == "":
+        return True
+    try:
+        return abs(float(val)) < 1e-12
+    except (ValueError, TypeError):
+        return False
+
+
 class BinanceReportParser:
     def __init__(self, file_path: str):
         self.file_path = Path(file_path)
@@ -47,7 +73,6 @@ class BinanceReportParser:
         return self.identifiers
 
     def _dedup_phones(self):
-        """Jezeli SMS jest podzbiorem Mobile (bez kierunkowego), usun duplikat."""
         phones = sorted(self.identifiers.phones)
         to_remove = set()
         for p1 in phones:
@@ -63,7 +88,6 @@ class BinanceReportParser:
         self.identifiers.phones -= to_remove
 
     def _add_time_range(self, df: pd.DataFrame, sheet_name: str):
-        """Zapisuje zakres czasowy arkusza jezeli znajdzie kolumny czasowe."""
         tr = extract_time_range(df)
         if tr:
             self.identifiers.time_ranges[sheet_name] = tr
@@ -112,46 +136,46 @@ class BinanceReportParser:
     # ASSETS OVERVIEW
     # ============================================================
     def _parse_assets_overview(self, df: pd.DataFrame):
-        """Parsuje Assets Overview — salda per waluta + Estimate Total Balance."""
+        """Parsuje Assets Overview — salda per waluta + Estimate Total Balance.
+        Pomija waluty z zerowym saldem."""
         # Szukamy Estimate Total Balance(BTC) w pierwszych wierszach
-        for i in range(min(10, len(df))):
+        for i in range(min(15, len(df))):
             for j in range(len(df.columns)):
                 val = clean_val(df.iloc[i, j])
                 if val and "estimate total balance" in str(val).lower():
-                    # Nastepna komorka w prawo lub w dol to wartosc
                     for di, dj in [(0, 1), (1, 0), (1, 1)]:
                         ni, nj = i + di, j + dj
                         if ni < len(df) and nj < len(df.columns):
                             btc_val = clean_val(df.iloc[ni, nj])
-                            if btc_val:
-                                self.identifiers.estimate_total_btc = str(btc_val)
-                                print(f"    Estimate Total Balance(BTC): {btc_val}")
+                            if btc_val and not _is_zero(btc_val):
+                                self.identifiers.estimate_total_btc = _fmt_num(btc_val)
+                                print(f"    Estimate Total Balance(BTC): {self.identifiers.estimate_total_btc}")
                                 break
 
-        # Szukamy tabel z saldami — naglowki zawieraja "Currency Name" lub "Currency Code"
-        current_wallet = "Spot"  # domyslnie Spot, potem moze byc inny
+        # Szukamy tabel z saldami
+        current_wallet = "Spot"
         i = 0
         while i < len(df):
             row = df.iloc[i]
             row_vals = [str(v).strip().lower() if pd.notna(v) else "" for v in row.values]
+            row_str = " ".join(row_vals)
 
             # Wykryj nazwe sekcji/portfela
-            if any("spot" in v for v in row_vals):
+            if "spot" in row_str:
                 current_wallet = "Spot"
-            elif any("futures" in v for v in row_vals):
+            elif "futures" in row_str:
                 current_wallet = "Futures"
-            elif any("earn" in v for v in row_vals):
+            elif "earn" in row_str:
                 current_wallet = "Earn"
-            elif any("margin" in v for v in row_vals):
+            elif "margin" in row_str:
                 current_wallet = "Margin"
-            elif any("pool" in v for v in row_vals):
+            elif "pool" in row_str:
                 current_wallet = "Pool"
-            elif any("funding" in v for v in row_vals):
+            elif "funding" in row_str:
                 current_wallet = "Funding"
 
-            # Wykryj naglowek tabeli
-            if "currency name" in row_vals or "currency code" in row_vals:
-                # Znajdz indeksy kolumn
+            # Wykryj naglowek tabeli (Currency Name lub Currency Code)
+            if "currency name" in row_str or "currency code" in row_str or "all positions" in row_str:
                 headers = [clean_val(v) for v in row.values]
                 col_map = {}
                 for idx_h, h in enumerate(headers):
@@ -159,9 +183,9 @@ class BinanceReportParser:
                         h_lower = str(h).lower().strip()
                         if "currency name" in h_lower:
                             col_map["currency_name"] = idx_h
-                        elif "currency code" in h_lower or "code" in h_lower:
+                        elif "currency code" in h_lower or (h_lower == "code" and "currency" not in row_str):
                             col_map["currency_code"] = idx_h
-                        elif "all positions" in h_lower or "all" in h_lower:
+                        elif "all positions" in h_lower or h_lower == "all":
                             col_map["all_positions"] = idx_h
                         elif "available" in h_lower:
                             col_map["available_positions"] = idx_h
@@ -169,28 +193,37 @@ class BinanceReportParser:
                             col_map["in_withdrawal"] = idx_h
                         elif "pending" in h_lower:
                             col_map["pending_order"] = idx_h
-                        elif "btc equivalent" in h_lower or "btc" in h_lower:
+                        elif "btc equivalent" in h_lower or ("btc" in h_lower and "equivalent" in h_lower):
                             col_map["btc_equivalent"] = idx_h
-                        elif "usdt equivalent" in h_lower or "usdt" in h_lower:
+                        elif "usdt equivalent" in h_lower or ("usdt" in h_lower and "equivalent" in h_lower):
                             col_map["usdt_equivalent"] = idx_h
 
-                if "currency_code" in col_map:
-                    # Czytamy wiersze az do pustego
+                if "currency_code" in col_map or "currency_name" in col_map:
                     i += 1
                     while i < len(df):
                         row_data = df.iloc[i]
-                        code_val = clean_val(row_data.iloc[col_map.get("currency_code", 0)])
+                        # Pobierz kod waluty (lub nazwe jesli kodu nie ma)
+                        code_idx = col_map.get("currency_code", col_map.get("currency_name", 0))
+                        code_val = clean_val(row_data.iloc[code_idx])
                         if not code_val:
                             break
+
+                        all_pos = clean_val(row_data.iloc[col_map.get("all_positions", 0)]) if "all_positions" in col_map else ""
+
+                        # POMIJAMY jezeli all_positions to 0 lub puste
+                        if _is_zero(all_pos):
+                            i += 1
+                            continue
+
                         bal = AssetBalance(
                             currency_name=str(clean_val(row_data.iloc[col_map.get("currency_name", 0)])) if "currency_name" in col_map else "",
                             currency_code=str(code_val),
-                            all_positions=str(clean_val(row_data.iloc[col_map.get("all_positions", 0)])) if "all_positions" in col_map else "",
-                            available_positions=str(clean_val(row_data.iloc[col_map.get("available_positions", 0)])) if "available_positions" in col_map else "",
-                            in_withdrawal=str(clean_val(row_data.iloc[col_map.get("in_withdrawal", 0)])) if "in_withdrawal" in col_map else "",
-                            pending_order=str(clean_val(row_data.iloc[col_map.get("pending_order", 0)])) if "pending_order" in col_map else "",
-                            btc_equivalent=str(clean_val(row_data.iloc[col_map.get("btc_equivalent", 0)])) if "btc_equivalent" in col_map else "",
-                            usdt_equivalent=str(clean_val(row_data.iloc[col_map.get("usdt_equivalent", 0)])) if "usdt_equivalent" in col_map else "",
+                            all_positions=_fmt_num(all_pos),
+                            available_positions=_fmt_num(clean_val(row_data.iloc[col_map.get("available_positions", 0)])) if "available_positions" in col_map else "",
+                            in_withdrawal=_fmt_num(clean_val(row_data.iloc[col_map.get("in_withdrawal", 0)])) if "in_withdrawal" in col_map else "",
+                            pending_order=_fmt_num(clean_val(row_data.iloc[col_map.get("pending_order", 0)])) if "pending_order" in col_map else "",
+                            btc_equivalent=_fmt_num(clean_val(row_data.iloc[col_map.get("btc_equivalent", 0)])) if "btc_equivalent" in col_map else "",
+                            usdt_equivalent=_fmt_num(clean_val(row_data.iloc[col_map.get("usdt_equivalent", 0)])) if "usdt_equivalent" in col_map else "",
                             wallet_type=current_wallet,
                         )
                         self.identifiers.asset_balances.append(bal)
@@ -198,23 +231,24 @@ class BinanceReportParser:
                     continue
             i += 1
 
-        print(f"    Sparsowano {len(self.identifiers.asset_balances)} sald walut")
+        # Posortuj: najpierw Spot, potem Funding, potem reszta
+        wallet_order = {"Spot": 0, "Funding": 1, "Futures": 2, "Earn": 3, "Margin": 4, "Pool": 5}
+        self.identifiers.asset_balances.sort(
+            key=lambda b: (wallet_order.get(b.wallet_type, 99), b.currency_code))
+
+        total_nonzero = len(self.identifiers.asset_balances)
+        print(f"    Sparsowano {total_nonzero} sald walut (pominięto zera)")
 
     # ============================================================
-    # SPOT ASSET LOG
+    # SPOT / FUNDING ASSET LOG
     # ============================================================
     def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
         self._parse_asset_log(df, "Spot")
 
-    # ============================================================
-    # FUNDING ASSET LOG
-    # ============================================================
     def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
         self._parse_asset_log(df, "Funding")
 
     def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str):
-        """Parsuje Spot/Funding Asset Log — kazdy wiersz to transakcja."""
-        # Znajdz mapowanie kolumn
         cols = [str(c).strip().lower() for c in df.columns]
         col_map = {}
         for idx, c in enumerate(cols):
@@ -239,11 +273,11 @@ class BinanceReportParser:
             txn = AssetTransaction(
                 time=str(clean_val(row.iloc[col_map.get("time", 0)])) if "time" in col_map else "",
                 currency=str(clean_val(row.iloc[col_map.get("currency", 0)])) if "currency" in col_map else "",
-                amount=str(clean_val(row.iloc[col_map.get("amount", 0)])) if "amount" in col_map else "",
-                locked=str(clean_val(row.iloc[col_map.get("locked", 0)])) if "locked" in col_map else "",
-                freeze=str(clean_val(row.iloc[col_map.get("freeze", 0)])) if "freeze" in col_map else "",
-                processing=str(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
-                change=str(clean_val(row.iloc[col_map.get("change", 0)])) if "change" in col_map else "",
+                amount=_fmt_num(clean_val(row.iloc[col_map.get("amount", 0)])) if "amount" in col_map else "",
+                locked=_fmt_num(clean_val(row.iloc[col_map.get("locked", 0)])) if "locked" in col_map else "",
+                freeze=_fmt_num(clean_val(row.iloc[col_map.get("freeze", 0)])) if "freeze" in col_map else "",
+                processing=_fmt_num(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
+                change=_fmt_num(clean_val(row.iloc[col_map.get("change", 0)])) if "change" in col_map else "",
                 reason=str(clean_val(row.iloc[col_map.get("reason", 0)])) if "reason" in col_map else "",
                 wallet_type=wallet_type,
             )
@@ -256,7 +290,6 @@ class BinanceReportParser:
         count = len(self.identifiers.spot_transactions) if wallet_type == "Spot" else len(self.identifiers.funding_transactions)
         print(f"    Sparsowano {count} transakcji {wallet_type}")
 
-        # Ekstrakcja ID z Asset Log (User ID, Transaction ID)
         if "Transaction ID" in df.columns:
             for v in df["Transaction ID"].dropna():
                 v = clean_val(v)
