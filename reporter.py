@@ -43,11 +43,43 @@ def _to_float(val: str) -> float:
         return 0.0
 
 
+def _is_pending_transaction(t: AssetTransaction) -> bool:
+    """Sprawdza czy transakcja jest pending/niepotwierdzona (pomijamy w podsumowaniu)."""
+    reason = str(t.reason).lower().strip() if t.reason else ""
+    if not reason:
+        return False
+    # Pending keywords
+    pending_kw = ["pending", "processing", "initiated", "created", "request", "order"]
+    # Operacje ktore musza miec 'success' aby byc liczone
+    success_required = ["withdrawal", "deposit", "transfer"]
+
+    # Jezeli zawiera pending keyword i nie ma success
+    has_pending = any(kw in reason for kw in pending_kw)
+    has_success = "success" in reason
+    if has_pending and not has_success:
+        return True
+
+    # Jezeli to operacja wymagajaca success, a go nie ma
+    for op in success_required:
+        if op in reason and not has_success:
+            # Wyjatki: "fee", "commission", "reward" nie wymagaja success
+            if any(x in reason for x in ["fee", "commission", "reward", "interest", "staking", "airdrop"]):
+                return False
+            return True
+
+    return False
+
+
 def _sum_asset_flow(transactions: List[AssetTransaction]) -> Dict[str, Dict[str, float]]:
     """Podsumowanie przeplywow per waluta: przychody, rozchody, netto.
-    Zwraca tylko waluty z niezerowym przeplywem."""
+    Zwraca tylko waluty z niezerowym przeplywem. Pomija pending/niepotwierdzone."""
     result = {}
+    skipped = 0
     for t in transactions:
+        # Pomin pending
+        if _is_pending_transaction(t):
+            skipped += 1
+            continue
         curr = t.currency.upper() if t.currency else "UNKNOWN"
         if curr not in result:
             result[curr] = {"in": 0.0, "out": 0.0, "count_in": 0, "count_out": 0}
@@ -58,6 +90,9 @@ def _sum_asset_flow(transactions: List[AssetTransaction]) -> Dict[str, Dict[str,
         elif chg < -1e-12:
             result[curr]["out"] += abs(chg)
             result[curr]["count_out"] += 1
+
+    if skipped > 0:
+        print(f"    Pominięto {skipped} transakcji pending/niepotwierdzonych")
 
     # Usun waluty z zerowym przeplywem
     return {k: v for k, v in result.items() if v["in"] > 1e-12 or v["out"] > 1e-12}
