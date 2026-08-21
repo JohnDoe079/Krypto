@@ -346,9 +346,16 @@ class ReportGenerator:
         for curr in sorted(flow.keys()):
             data = flow[curr]
             netto = data["in"] - data["out"]
+            curr_txns = txns_by_currency.get(curr, [])
+
+            # Zakres dat dla tej waluty
+            times = [t.time for t in curr_txns if t.time]
+            time_range_str = ""
+            if times:
+                time_range_str = f"  (zakres: {min(times)[:19]} → {max(times)[:19]})"
 
             # Podsumowanie waluty — 1 wiersz
-            self._add_paragraph(f"Waluta {curr}:", bold=True)
+            self._add_paragraph(f"Waluta {curr}:{time_range_str}", bold=True)
             summary_row = [[
                 f"+{fmt(data['in'])}",
                 f"-{fmt(data['out'])}",
@@ -360,13 +367,28 @@ class ReportGenerator:
                 ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
                 summary_row)
 
+            # Sprawdzamy czy saldo z Assets Overview zgadza sie z Asset Log
+            asset_balance = None
+            for b in r.asset_balances:
+                if b.currency_code.upper() == curr:
+                    asset_balance = b
+                    break
+
+            if asset_balance:
+                bal_all = _to_float(asset_balance.all_positions)
+                if abs(netto - bal_all) > 1e-8:
+                    diff = bal_all - netto
+                    self._add_paragraph(
+                        f"    ℹ️ Roznica miedzy Asset Log ({fmt_signed(netto)}) a Assets Overview ({fmt_signed(bal_all)}): {fmt_signed(diff)} {curr}. "
+                        f"Brakujace transakcje (depozyty, wypłaty, transfery) znajduja sie w innych arkuszach.",
+                        color=RGBColor(0x00, 0x60, 0x80))
+
             # Flaga dla ujemnego salda
             if netto < -1e-12:
                 self._add_paragraph(
-                    f"    ⚠️ UWAGA: Ujemne saldo {curr} ({fmt_signed(netto)}). "
-                    f"Rozchody przewyzszyly przychody o {fmt(abs(netto))} {curr}. "
-                    "Prawdopodobne przyczyny: (1) depozyt z zewnatrz w 'Deposit History', "
-                    "(2) transfer z innego portfela (Funding/Spot), (3) poczatkowe saldo przed pierwsza data w logu.",
+                    f"    ⚠️ UWAGA: Ujemne saldo w Asset Log ({fmt_signed(netto)}). "
+                    f"Oznacza to ze w okresie objetym tym logiem rozchody przewyzszyly przychody. "
+                    f"Nie oznacza to debetu — brakuje tu depozytow/wypłat z arkuszy Deposit/Withdrawal History.",
                     color=RGBColor(0xC0, 0x00, 0x00))
 
             # Szczegoly transakcji dla tej waluty (pomijamy zmiana = 0)
