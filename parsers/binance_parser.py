@@ -262,6 +262,10 @@ class BinanceReportParser:
                 col_map["processing"] = idx
             elif "reason" in c or "type" in c or "operation" in c:
                 col_map["reason"] = idx
+            elif "description" in c or "desc" in c or "note" in c:
+                col_map["description"] = idx
+            elif "available" in c:
+                col_map["available"] = idx
             elif "transaction id" in c or "txid" in c or "tx id" in c:
                 col_map["transaction_id"] = idx
 
@@ -272,12 +276,27 @@ class BinanceReportParser:
             if chg_val is None:
                 amt_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
                 if amt_val:
-                    reason = str(clean_val(row.iloc[col_map.get("reason", 0)])).lower() if "reason" in col_map else ""
-                    if any(kw in reason for kw in ["withdrawal", "send", "out", "fee", "sell"]):
-                        chg_val = f"-{amt_val}"
-                    elif any(kw in reason for kw in ["deposit", "receive", "in", "buy", "reward", "staking", "airdrop"]):
-                        chg_val = f"+{amt_val}"
-                    else:
+                    # Sprawdź czy Amount już ma znak (ujemne = rozchód)
+                    normalized = _normalize_decimal(amt_val)
+                    try:
+                        amt_float = float(normalized)
+                        if amt_float < -1e-12:
+                            # Amount już jest ujemne — użyj bez zmian
+                            chg_val = amt_val
+                        elif amt_float > 1e-12:
+                            # Dodatnie — spróbuj odgadnąć znak z Reason / Description
+                            reason = str(clean_val(row.iloc[col_map.get("reason", 0)])).lower() if "reason" in col_map else ""
+                            desc = str(clean_val(row.iloc[col_map.get("description", 0)])).lower() if "description" in col_map else ""
+                            combined = reason + " " + desc
+                            if any(kw in combined for kw in ["withdrawal", "send", "out", "fee", "sell"]):
+                                chg_val = f"-{amt_val}"
+                            elif any(kw in combined for kw in ["deposit", "receive", "in", "buy", "reward", "staking", "airdrop"]):
+                                chg_val = f"+{amt_val}"
+                            else:
+                                chg_val = amt_val
+                        else:
+                            chg_val = amt_val  # Zero
+                    except (ValueError, TypeError):
                         chg_val = amt_val
 
             txn = AssetTransaction(
@@ -292,9 +311,7 @@ class BinanceReportParser:
                 transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
                 wallet_type=wallet_type,
             )
-            # DEBUG: print every transaction with non-zero change
-            if txn.change and not _is_zero(txn.change):
-                print(f"    [DEBUG] {wallet_type} txn: {txn.currency} change={txn.change} reason={txn.reason}")
+
             if txn.time or txn.currency:
                 if wallet_type == "Spot":
                     self.identifiers.spot_transactions.append(txn)
