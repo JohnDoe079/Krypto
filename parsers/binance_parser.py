@@ -500,6 +500,7 @@ class BinanceReportParser:
                 col_map["user_id"] = idx
 
         print(f"  Kolumny Deposit History: {list(col_map.keys())}")
+        print(f"  Wszystkie kolumny: {list(df.columns)}")
 
         for _, row in df.iterrows():
             curr = str(clean_val(row.iloc[col_map.get("currency", 0)])) if "currency" in col_map else ""
@@ -567,6 +568,7 @@ class BinanceReportParser:
                 col_map["user_id"] = idx
 
         print(f"  Kolumny Withdrawal History: {list(col_map.keys())}")
+        print(f"  Wszystkie kolumny: {list(df.columns)}")
 
         for _, row in df.iterrows():
             curr = str(clean_val(row.iloc[col_map.get("currency", 0)])) if "currency" in col_map else ""
@@ -693,16 +695,95 @@ class BinanceReportParser:
                     self.identifiers.related_user_ids.add(str(v))
 
     def _parse_otc_trading(self, df: pd.DataFrame, sheet_name: str):
-        if "OrderId" in df.columns:
-            for v in df["OrderId"].dropna():
+        print(f"  Wszystkie kolumny w OTC Trading: {list(df.columns)}")
+        cols = [str(c).strip().lower() for c in df.columns]
+        col_map = {}
+        for idx, c in enumerate(cols):
+            if "order" in c and "id" in c:
+                col_map["order_id"] = idx
+            elif "user" in c and "id" in c:
+                col_map["user_id"] = idx
+            elif "side" in c or "type" in c:
+                col_map["side"] = idx
+            elif "status" in c:
+                col_map["status"] = idx
+            elif "symbol" in c or "pair" in c:
+                col_map["symbol"] = idx
+            elif "base" in c and "asset" in c:
+                col_map["base_asset"] = idx
+            elif "quote" in c and "asset" in c:
+                col_map["quote_asset"] = idx
+            elif "base" in c and "qty" in c:
+                col_map["base_qty"] = idx
+            elif "quote" in c and "qty" in c:
+                col_map["quote_qty"] = idx
+            elif "time" in c or "date" in c:
+                col_map["time"] = idx
+
+        # Extract IDs
+        if "order_id" in col_map:
+            for v in df.iloc[:, col_map["order_id"]].dropna():
                 v = clean_val(v)
                 if v:
-                    self.identifiers.order_ids.add(v)
-        if "UserId" in df.columns:
-            for v in df["UserId"].dropna():
+                    self.identifiers.order_ids.add(str(v))
+        if "user_id" in col_map:
+            for v in df.iloc[:, col_map["user_id"]].dropna():
                 v = clean_val(v)
                 if v:
                     self.identifiers.related_user_ids.add(str(v))
+
+        # Parse transactions
+        if "base_asset" in col_map and "base_qty" in col_map:
+            for _, row in df.iterrows():
+                base = str(clean_val(row.iloc[col_map["base_asset"]])) if "base_asset" in col_map else ""
+                quote = str(clean_val(row.iloc[col_map["quote_asset"]])) if "quote_asset" in col_map else ""
+                side = str(clean_val(row.iloc[col_map["side"]])).upper() if "side" in col_map else ""
+                base_qty = clean_val(row.iloc[col_map["base_qty"]]) if "base_qty" in col_map else None
+                quote_qty = clean_val(row.iloc[col_map["quote_qty"]]) if "quote_qty" in col_map else None
+                time_str = str(clean_val(row.iloc[col_map["time"]])) if "time" in col_map else ""
+                status = str(clean_val(row.iloc[col_map["status"]])).lower() if "status" in col_map else ""
+
+                if not base or not base_qty:
+                    continue
+
+                # Base asset: SELL = -, BUY = +
+                if side == "SELL":
+                    base_chg = f"-{base_qty}"
+                elif side == "BUY":
+                    base_chg = f"+{base_qty}"
+                else:
+                    base_chg = base_qty
+
+                txn_base = AssetTransaction(
+                    time=time_str,
+                    currency=base,
+                    amount=_fmt_num(base_qty),
+                    change=_fmt_num(base_chg),
+                    reason=f"OTC {side} {base}{quote} ({status})",
+                    wallet_type="OTC",
+                )
+                self.identifiers.spot_transactions.append(txn_base)
+
+                # Quote asset: SELL = + (receive quote), BUY = - (pay quote)
+                if quote and quote_qty:
+                    if side == "SELL":
+                        quote_chg = f"+{quote_qty}"
+                    elif side == "BUY":
+                        quote_chg = f"-{quote_qty}"
+                    else:
+                        quote_chg = quote_qty
+
+                    txn_quote = AssetTransaction(
+                        time=time_str,
+                        currency=quote,
+                        amount=_fmt_num(quote_qty),
+                        change=_fmt_num(quote_chg),
+                        reason=f"OTC {side} {base}{quote} ({status})",
+                        wallet_type="OTC",
+                    )
+                    self.identifiers.spot_transactions.append(txn_quote)
+
+            print(f"  Sparsowano {len(self.identifiers.spot_transactions)} transakcji OTC")
 
     def _parse_order_history(self, df: pd.DataFrame, sheet_name: str):
         if "Order ID" in df.columns:

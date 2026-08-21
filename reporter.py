@@ -385,10 +385,13 @@ class ReportGenerator:
                 for t in nonzero_txns:
                     chg = _to_float(t.change)
                     chg_str = _fmt_signed(chg)
+                    reason_display = t.reason if t.reason else "—"
+                    if len(reason_display) > 60:
+                        reason_display = reason_display[:57] + "..."
                     txn_rows.append([
                         t.time[:19] if t.time else "",
                         chg_str,
-                        t.reason if t.reason else "—",
+                        reason_display,
                         t.transaction_id[:20] if t.transaction_id else "—",
                     ])
                 self._add_table(
