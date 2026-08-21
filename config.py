@@ -1,7 +1,6 @@
 # config.py
 """Konfiguracja nazw arkuszy i mapowania kolumn."""
 
-# Znane arkusze Binance -> metoda parsera
 BINANCE_SHEETS = {
     "Customer Information": "customer_info",
     "KYC Documents": "kyc_docs",
@@ -23,7 +22,6 @@ BINANCE_SHEETS = {
 
 HTX_SHEETS = {}
 
-# Katalogi z danymi
 DATA_DIRS = {
     "binance": "data/binance",
     "htx": "data/htx",

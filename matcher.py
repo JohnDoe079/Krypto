@@ -9,7 +9,6 @@ class ReportComparator:
         self.reports = reports
 
     def _get_all_ids_for_field(self, report: ExtractedIdentifiers, field_name: str) -> set:
-        """Zwraca wszystkie ID dla danego pola (łączy user_ids + related_user_ids jeżeli to user)."""
         if field_name == "all_user_ids":
             return report.user_ids | report.related_user_ids
         return set(getattr(report, field_name, set()))
@@ -39,14 +38,12 @@ class ReportComparator:
             if common:
                 result["common"][field_name] = []
                 for val in sorted(common):
-                    # Znajdź pliki, w których występuje ta wartość
                     files_with_val = []
                     time_overview = []
                     for r in self.reports:
                         ids = self._get_all_ids_for_field(r, field_name)
                         if val in ids:
                             files_with_val.append(r.source_file)
-                            # Zbierz zakresy czasowe z tego pliku
                             if r.time_ranges:
                                 ranges = []
                                 for sheet, tr in r.time_ranges.items():
@@ -89,15 +86,15 @@ class ReportComparator:
             print("\n🔴 WSPÓLNE IDENTYFIKATORY (POTENCJALNE POWIĄZANIA):")
             print("-" * 70)
             for field, entries in common.items():
-                print(f"\n  [{field}] — {len(entries)} wspólnych:")
+                print(f"\n [{field}] — {len(entries)} wspólnych:")
                 for e in entries:
                     files_str = ", ".join(e["files"])
-                    print(f"    → {e['value']}  (występuje w: {files_str})")
+                    print(f" → {e['value']} (występuje w: {files_str})")
                     if "time_context" in e:
                         for tc in e["time_context"]:
-                            print(f"       Czas ({tc['file']}):")
-                            for r in tc["ranges"][:3]:  # max 3 zakresy
-                                print(f"         • {r}")
+                            print(f"   Czas ({tc['file']}):")
+                            for r in tc["ranges"][:3]:
+                                print(f"   • {r}")
         else:
             print("\n✅ Nie znaleziono wspólnych identyfikatorów.")
 
@@ -107,4 +104,4 @@ class ReportComparator:
             print("-" * 70)
             for key, values in unique.items():
                 file_name, field = key.split("__", 1)
-                print(f"\n  {file_name} :: [{field}] — {len(values)} unikalnych")
+                print(f"\n {file_name} :: [{field}] — {len(values)} unikalnych")

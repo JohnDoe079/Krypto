@@ -82,7 +82,7 @@ python main.py -v
 - **Assets Overview** – salda walutowe per portfel (Spot, Funding, Futures, Earn, Margin, Pool)
 - **Spot Asset Log** – historia ruchów na portfelu Spot
 - **Funding Asset Log** – historia ruchów na portfelu Funding
-- **Deposit History / Withdrawal History** – wpłaty i wypłaty (adresy portfeli, TXID)
+- **Deposit History / Withdrawal History** – wpłaty i wypłaty (adresy portfeli, TXID) + sumowanie do bilansu
 - **Fiat Deposit / Fiat Trades** – dane fiat (karty, IBAN, e-maile)
 - **Binance Pay / P2P / OTC Trading** – transakcje peer-to-peer
 - **Access Logs / Approved Devices** – logi IP, urządzenia, geolokalizacja
@@ -98,6 +98,11 @@ python main.py -v
 - ID urządzeń, zamówień, kontrahentów
 - Imiona, nazwiska, narodowości, numery dokumentów
 
+### Bilans przepływów
+- **Per arkusz**: Spot, Funding, Deposit, Withdrawal — każdy osobno z podsumowaniem przychodów/rozchodów
+- **Łączny bilans**: automatyczne zsumowanie wszystkich źródeł per waluta + porównanie z Assets Overview
+- Wykrywanie ujemnych sald i transakcji pending
+
 ### Porównanie raportów
 - Automatyczne wykrywanie **wspólnych identyfikatorów** między raportami (potencjalne powiązania)
 - Lista **unikalnych identyfikatorów** per plik
@@ -110,7 +115,8 @@ python main.py -v
 - Szczegółowa analiza każdego raportu:
   - Dane KYC i basic info
   - Salda walutowe z podziałem na portfele
-  - Logi Spot/Funding z podsumowaniem przepływów per waluta
+  - Logi Spot/Funding/Deposit/Withdrawal z podsumowaniem przepływów per waluta
+  - **Pełny bilans łączony** — suma ze wszystkich źródeł z porównaniem do Assets Overview
   - Wykrywanie ujemnych sald i transakcji pending
 - Porównanie między raportami
 - Pełna lista identyfikatorów
@@ -134,7 +140,9 @@ python main.py [-h] [-o OUTPUT] [-r REPORT] [--no-docx] [-v]
 
 - Parser **HTX** jest obecnie w fazie placeholdera – wymaga dostarczenia przykładowego pliku `.xlsx` do implementacji.
 - Transakcje oznaczone jako *pending* / *processing* / *initiated* są pomijane w podsumowaniu przepływów, ale widoczne w logach.
+- Status **"Completed"** w Deposit/Withdrawal History jest traktowany jako potwierdzony (nie pending).
 - Obrazki z arkusza **KYC Documents** są zapisywane do `output/images/`.
+- Różnica między pełnym bilansem przepływów a saldem z **Assets Overview** może wynikać z transferów między portfelami (Spot ↔ Funding) lub środków w innych produktach (Futures, Earn, Margin, Pool).
 
 ---
 

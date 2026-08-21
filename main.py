@@ -8,9 +8,9 @@ Parsuje WSZYSTKIE pliki .xlsx, porównuje między sobą,
 generuje raport DOCX.
 
 Użycie:
-  python main.py              # auto-scan + raport
-  python main.py --no-docx    # tylko JSON, bez DOCX
-  python main.py -v           # szczegółowe logi
+ python main.py              # auto-scan + raport
+ python main.py --no-docx    # tylko JSON, bez DOCX
+ python main.py -v           # szczegółowe logi
 """
 
 import argparse
@@ -66,7 +66,7 @@ def main():
         if files:
             print(f"\n📁 {exchange.upper()}: znaleziono {len(files)} plik(ów)")
             for file_path in files:
-                print(f"  📄 {file_path.name}")
+                print(f" 📄 {file_path.name}")
                 if exchange == "binance":
                     p = BinanceReportParser(str(file_path))
                 elif exchange == "htx":
@@ -87,13 +87,11 @@ def main():
         print("\n[!] Nie znaleziono żadnych plików .xlsx.")
         return
 
-    # Zapisz JSON
     output_data = [r.to_dict() for r in reports]
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
     print(f"\n💾 Zapisano wyniki JSON do: {args.output}")
 
-    # Porównanie
     if len(reports) >= 2:
         print(f"\n🔍 Porównywanie {len(reports)} raportów...")
         comp = ReportComparator(reports)
@@ -105,7 +103,6 @@ def main():
     else:
         print(f"\nℹ️ Tylko 1 raport — brak porównania.")
 
-    # Generuj raport DOCX
     if not args.no_docx:
         print(f"\n📝 Generowanie raportu DOCX: {args.report}...")
         gen = ReportGenerator(args.report)
