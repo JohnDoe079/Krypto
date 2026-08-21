@@ -11,7 +11,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 
-from models.schemas import ExtractedIdentifiers, AssetTransaction
+from models.schemas import ExtractedIdentifiers, AssetTransaction, _normalize_decimal
 from matcher import ReportComparator
 
 SECTION_TRANSLATIONS = {
@@ -37,8 +37,10 @@ PAGE_WIDTH_INCHES = 7.0
 
 
 def _to_float(val: str) -> float:
+    """Konwertuje string na float, obsługuje przecinek dziesiętny."""
     try:
-        return float(str(val).replace(",", "").replace(" ", ""))
+        normalized = _normalize_decimal(val)
+        return float(normalized)
     except (ValueError, TypeError):
         return 0.0
 
@@ -49,19 +51,16 @@ def _is_pending_transaction(t: AssetTransaction) -> bool:
     if not reason:
         return False
 
-    # Statusy OK (nie pending)
     ok_statuses = ["completed", "success", "filled", "confirmed"]
     if any(s in reason for s in ok_statuses):
         return False
 
-    # Pending keywords
     pending_kw = ["pending", "processing", "initiated", "created", "request", "order"]
     has_pending = any(kw in reason for kw in pending_kw)
     has_success = "success" in reason or "completed" in reason
     if has_pending and not has_success:
         return True
 
-    # Operacje które muszą mieć 'success' aby być liczone
     success_required = ["withdrawal", "deposit", "transfer"]
     for op in success_required:
         if op in reason and not has_success:
@@ -358,7 +357,6 @@ class ReportGenerator:
                 ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
                 summary_row)
 
-            # Porównanie z Assets Overview
             asset_balance = None
             for b in r.asset_balances:
                 if b.currency_code.upper() == curr:

@@ -11,6 +11,7 @@ from models.schemas import (
     AssetBalance,
     AssetTransaction,
     clean_val,
+    _normalize_decimal,
     is_valid_ip,
     is_wallet_address,
     is_txid,
@@ -22,6 +23,7 @@ from config import BINANCE_SHEETS
 
 
 def _fmt_num(val) -> str:
+    """Formatuje liczbę bez notacji naukowej, obsługuje przecinek dziesiętny."""
     if val is None or val == "":
         return ""
     try:
@@ -36,10 +38,21 @@ def _fmt_num(val) -> str:
         s = f"{f:.12f}".rstrip("0").rstrip(".")
         return s
     except (ValueError, TypeError, OverflowError):
-        return str(val).strip()
+        normalized = _normalize_decimal(val)
+        try:
+            f = float(normalized)
+            if abs(f) < 1e-12:
+                return "0"
+            if f == int(f):
+                return str(int(f))
+            s = f"{f:.12f}".rstrip("0").rstrip(".")
+            return s
+        except (ValueError, TypeError, OverflowError):
+            return str(val).strip()
 
 
 def _is_zero(val) -> bool:
+    """Sprawdza czy wartość to zero lub puste, z obsługą przecinka dziesiętnego."""
     if val is None or val == "":
         return True
     try:
@@ -47,7 +60,11 @@ def _is_zero(val) -> bool:
             return val == 0
         return abs(float(val)) < 1e-12
     except (ValueError, TypeError, OverflowError):
-        return False
+        try:
+            normalized = _normalize_decimal(val)
+            return abs(float(normalized)) < 1e-12
+        except (ValueError, TypeError, OverflowError):
+            return False
 
 
 class BinanceReportParser:

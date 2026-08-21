@@ -191,6 +191,50 @@ def clean_val(val) -> Optional[str]:
     return v
 
 
+def _normalize_decimal(val) -> str:
+    """Normalizuje string liczbowy do formatu z kropką dziesiętną.
+
+    Obsługuje formaty:
+    - US:           1,000.50   → 1000.50
+    - Europejski:   1.000,50   → 1000.50
+    - Bez tysięcy:  0,05936011 → 0.05936011
+    - Ze spacją:    6 020,55   → 6020.55
+    """
+    if val is None or val == "":
+        return ""
+    s = str(val).strip()
+
+    # Usuń spacje (zawsze separatory tysięcy)
+    s = s.replace(" ", "")
+
+    if "," in s and "." in s:
+        last_comma = s.rfind(",")
+        last_dot = s.rfind(".")
+        if last_comma > last_dot:
+            # Europejski: 1.000,50
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # US: 1,000.50
+            s = s.replace(",", "")
+    elif "," in s:
+        parts = s.split(",")
+        if len(parts) == 2:
+            after = parts[1]
+            before = parts[0]
+            # W krypto po przecinku zazwyczaj jest >2 cyfr (np. 0,05936011)
+            if len(after) > 2:
+                s = s.replace(",", ".")
+            elif len(after) <= 2 and len(before) > 3:
+                # Prawdopodobnie tysiące, np. 1,000
+                s = s.replace(",", "")
+            else:
+                s = s.replace(",", ".")
+        else:
+            s = s.replace(",", ".")
+
+    return s
+
+
 def is_valid_ip(val: str) -> bool:
     if not val:
         return False
