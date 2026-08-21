@@ -292,6 +292,9 @@ class BinanceReportParser:
                 transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
                 wallet_type=wallet_type,
             )
+            # DEBUG: print every transaction with non-zero change
+            if txn.change and not _is_zero(txn.change):
+                print(f"    [DEBUG] {wallet_type} txn: {txn.currency} change={txn.change} reason={txn.reason}")
             if txn.time or txn.currency:
                 if wallet_type == "Spot":
                     self.identifiers.spot_transactions.append(txn)
