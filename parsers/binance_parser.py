@@ -270,34 +270,28 @@ class BinanceReportParser:
                 col_map["transaction_id"] = idx
 
         print(f"  Kolumny Asset Log ({wallet_type}): {list(col_map.keys())}")
+        print(f"  Wszystkie kolumny w arkuszu: {list(df.columns)}")
 
         for _, row in df.iterrows():
             chg_val = clean_val(row.iloc[col_map.get("change", 0)]) if "change" in col_map else None
             if chg_val is None:
                 amt_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
                 if amt_val:
-                    # Sprawdź czy Amount już ma znak (ujemne = rozchód)
-                    normalized = _normalize_decimal(amt_val)
-                    try:
-                        amt_float = float(normalized)
-                        if amt_float < -1e-12:
-                            # Amount już jest ujemne — użyj bez zmian
-                            chg_val = amt_val
-                        elif amt_float > 1e-12:
-                            # Dodatnie — spróbuj odgadnąć znak z Reason / Description
-                            reason = str(clean_val(row.iloc[col_map.get("reason", 0)])).lower() if "reason" in col_map else ""
-                            desc = str(clean_val(row.iloc[col_map.get("description", 0)])).lower() if "description" in col_map else ""
-                            combined = reason + " " + desc
-                            if any(kw in combined for kw in ["withdrawal", "send", "out", "fee", "sell"]):
-                                chg_val = f"-{amt_val}"
-                            elif any(kw in combined for kw in ["deposit", "receive", "in", "buy", "reward", "staking", "airdrop"]):
-                                chg_val = f"+{amt_val}"
-                            else:
-                                chg_val = amt_val
-                        else:
-                            chg_val = amt_val  # Zero
-                    except (ValueError, TypeError):
-                        chg_val = amt_val
+                    # Binance Spot Asset Log: Amount JUŻ zawiera znak (+/-)
+                    # Używamy bezpośrednio bez odgadywania z Description
+                    chg_val = amt_val
+
+            # Połącz Type (Reason) + Description dla pełniejszego opisu
+            reason_parts = []
+            if "reason" in col_map:
+                r = clean_val(row.iloc[col_map["reason"]])
+                if r:
+                    reason_parts.append(str(r))
+            if "description" in col_map:
+                d = clean_val(row.iloc[col_map["description"]])
+                if d:
+                    reason_parts.append(str(d))
+            full_reason = " | ".join(reason_parts) if reason_parts else ""
 
             txn = AssetTransaction(
                 time=str(clean_val(row.iloc[col_map.get("time", 0)])) if "time" in col_map else "",
@@ -307,11 +301,10 @@ class BinanceReportParser:
                 freeze=_fmt_num(clean_val(row.iloc[col_map.get("freeze", 0)])) if "freeze" in col_map else "",
                 processing=_fmt_num(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
                 change=_fmt_num(chg_val) if chg_val else "",
-                reason=str(clean_val(row.iloc[col_map.get("reason", 0)])) if "reason" in col_map else "",
+                reason=full_reason,
                 transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
                 wallet_type=wallet_type,
             )
-
             if txn.time or txn.currency:
                 if wallet_type == "Spot":
                     self.identifiers.spot_transactions.append(txn)
