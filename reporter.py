@@ -506,7 +506,7 @@ class ReportGenerator:
                         f"Nie oznacza to debetu — brakuje tu depozytów/wypłat z innych źródeł.",
                         color=RGBColor(0xC0, 0x00, 0x00))
 
-                # Tabela transakcji — WSZYSTKIE z oznaczeniem statusu bilansowego
+                # Tabela transakcji — WSZYSTKIE (w tym fiat, oznaczone jako duplikat lub unikalne)
                 txn_rows = []
                 for t in sorted(txns, key=lambda x: x.time or ""):
                     chg = _to_float(t.change)
@@ -514,22 +514,11 @@ class ReportGenerator:
                         continue
 
                     is_dup = _is_fiat_duplicate(t, confirmed_all)
-                    is_pending = _is_pending_transaction(t)
                     chg_str = _fmt_signed(chg)
-                    status_markers = []
-
-                    if is_pending:
-                        status_markers.append("[PENDING]")
-                    elif is_dup:
-                        status_markers.append("[DUPLIKAT]")
-                    elif t.wallet_type == "Fiat":
-                        status_markers.append("[BILANS]")
-                    else:
-                        status_markers.append("[BILANS]")
-
                     # Dla fiat-duplikatów: nawias + gwiazdka
                     if t.wallet_type == "Fiat" and is_dup:
                         chg_str = f"({_fmt_signed(chg)})*"
+                    # Dla fiat-unikalnych: bez nawiasu (liczy się do bilansu)
                     elif t.wallet_type == "Fiat" and not is_dup:
                         chg_str = f"{_fmt_signed(chg)} [FIAT]"
 
@@ -538,7 +527,6 @@ class ReportGenerator:
                     txn_rows.append([
                         t.time[:19] if t.time else "",
                         chg_str,
-                        " ".join(status_markers),
                         reason_display,
                         source_display,
                         t.transaction_id[:20] if t.transaction_id else "—",
@@ -546,25 +534,20 @@ class ReportGenerator:
 
                 if txn_rows:
                     self._add_table(
-                        ["Czas", "Zmiana", "Status", "Powód", "Źródło", "TxID"],
+                        ["Czas", "Zmiana", "Powód", "Źródło", "TxID"],
                         txn_rows,
-                        col_widths=[Inches(1.0), Inches(0.8), Inches(0.7), Inches(2.4), Inches(1.0), Inches(1.3)])
+                        col_widths=[Inches(1.0), Inches(0.8), Inches(2.8), Inches(1.1), Inches(1.3)])
 
-                    # Legenda
+                    # Dodaj legendę, jeśli były duplikaty fiat
                     has_fiat_dup = any(t.wallet_type == "Fiat" and _is_fiat_duplicate(t, confirmed_all) for t in txns)
                     has_fiat_unique = any(t.wallet_type == "Fiat" and not _is_fiat_duplicate(t, confirmed_all) for t in txns)
-                    has_pending = any(_is_pending_transaction(t) for t in txns)
-                    if has_pending:
-                        self._add_paragraph(
-                            "[PENDING] — transakcja niepotwierdzona, NIE wliczana do bilansu.",
-                            color=RGBColor(0x80, 0x60, 0x00))
                     if has_fiat_dup:
                         self._add_paragraph(
-                            "(*) Duplikat fiat — pokazany informacyjnie, NIE wliczany do bilansu (ten sam ruch jest w logach Spot/Funding).",
+                            "* Wartość w nawiasie to duplikat fiat — pokazana informacyjnie, nie wliczana do bilansu (ten sam ruch jest w logach Spot/Funding).",
                             color=RGBColor(0x80, 0x80, 0x80))
                     if has_fiat_unique:
                         self._add_paragraph(
-                            "[FIAT] [BILANS] — transakcja unikalna (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
+                            "[FIAT] Transakcja unikalna (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
                             color=RGBColor(0x00, 0x60, 0x80))
             else:
                 # Waluta w Assets Overview ale bez transakcji (lub tylko fiat)

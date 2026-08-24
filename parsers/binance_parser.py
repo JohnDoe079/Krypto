@@ -366,52 +366,19 @@ class BinanceReportParser:
 
         # --- Faza 3: Przetwórz każdą grupę ---
         for txid, rows in groups.items():
-            is_group = len(rows) > 1 and txid != ""
-            group_desc = ""
-            if is_group:
-                # Określ typ grupy na podstawie Description/Type
-                descriptions = set()
-                types = set()
-                for r in rows:
-                    if r.get("description"):
-                        descriptions.add(str(r["description"]).strip())
-                    if r.get("reason"):
-                        types.add(str(r["reason"]).strip())
-
-                # Klasyfikacja grupy
-                has_buy = any("bought" in t.lower() or "buy" in t.lower() for t in types)
-                has_sell = any("sell" in t.lower() or "sold" in t.lower() for t in types)
-                has_fee = any("fee" in d.lower() for d in descriptions)
-                has_expenses = any("expenses" in d.lower() for d in descriptions)
-                has_income = any("income" in d.lower() for d in descriptions)
-
-                if has_buy and has_expenses:
-                    group_desc = f"[GRUPA {txid}] Zakup spot (buy)"
-                elif has_sell and has_income:
-                    group_desc = f"[GRUPA {txid}] Sprzedaż spot (sell)"
-                elif has_buy:
-                    group_desc = f"[GRUPA {txid}] Zakup spot"
-                elif has_sell:
-                    group_desc = f"[GRUPA {txid}] Sprzedaż spot"
-                else:
-                    group_desc = f"[GRUPA {txid}] Transakcja złożona"
-
             for r in rows:
                 # change = Amount (zawiera znak +/-)
                 chg_val = r.get("change")
                 if chg_val is None:
                     chg_val = r.get("amount")
 
-                # reason = Type + " | " + Description
+                # reason = Type + " | " + Description (oryginalne opisy z Excela, bez tłumaczeń)
                 reason_parts = []
                 if r.get("reason"):
                     reason_parts.append(str(r["reason"]))
                 if r.get("description"):
                     reason_parts.append(str(r["description"]))
                 full_reason = " | ".join(reason_parts) if reason_parts else ""
-
-                if is_group and group_desc:
-                    full_reason = f"{group_desc} | {full_reason}"
 
                 txn = AssetTransaction(
                     time=str(r.get("time", "")) if r.get("time") else "",
@@ -442,7 +409,7 @@ class BinanceReportParser:
                         self.identifiers.order_ids.add(str(v))
 
         count = len(self.identifiers.spot_transactions) if wallet_type == "Spot" else len(self.identifiers.funding_transactions)
-        print(f"  Sparsowano {count} transakcji {wallet_type} (w tym {len([g for g in groups.values() if len(g)>1])} grup po Transaction ID)")
+        print(f"  Sparsowano {count} transakcji {wallet_type}")
 
         # Dodaj Transaction IDs do zbioru
         if "Transaction ID" in df.columns:
