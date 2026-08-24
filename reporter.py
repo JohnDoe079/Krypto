@@ -99,7 +99,7 @@ def _sum_asset_flow(transactions: List[AssetTransaction]) -> Dict[str, Dict[str,
 def _fmt(v: float) -> str:
     if abs(v) < 1e-12:
         return "0"
-    s = f"{abs(v):.10f}".rstrip("0").rstrip(".")
+    s = f"{abs(v):.12f}".rstrip("0").rstrip(".")
     if s.startswith("."):
         s = "0" + s
     return s
@@ -402,10 +402,10 @@ class ReportGenerator:
             self._add_paragraph("Brak danych o ruchach walut.")
             return
 
-        # Najpierw skrótowa tabela wszystkich walut (bilans BEZ fiat)
+        # Najpierw skrótowa tabela wszystkich walut (bilans zgodny ze szczegółami — bez duplikatów fiat)
         summary_rows = []
         for curr in all_currencies:
-            txns_bal = [t for t in txns_by_currency.get(curr, []) if t.wallet_type != "Fiat"]
+            txns_bal = [t for t in txns_by_currency.get(curr, []) if not _is_fiat_duplicate(t, confirmed_all)]
             total_in = sum(_to_float(t.change) for t in txns_bal if _to_float(t.change) > 0)
             total_out = sum(abs(_to_float(t.change)) for t in txns_bal if _to_float(t.change) < 0)
             netto = total_in - total_out
@@ -504,7 +504,7 @@ class ReportGenerator:
                         f"Nie oznacza to debetu — brakuje tu depozytów/wypłat z innych źródeł.",
                         color=RGBColor(0xC0, 0x00, 0x00))
 
-                # Tabela transakcji — WSZYSTKIE (w tym fiat, oznaczone jako duplikat lub unikalne)
+                # Tabela transakcji — WSZYSTKIE z oznaczeniem statusu bilansowego
                 txn_rows = []
                 for t in sorted(txns, key=lambda x: x.time or ""):
                     chg = _to_float(t.change)
@@ -512,11 +512,22 @@ class ReportGenerator:
                         continue
 
                     is_dup = _is_fiat_duplicate(t, confirmed_all)
+                    is_pending = _is_pending_transaction(t)
                     chg_str = _fmt_signed(chg)
+                    status_markers = []
+
+                    if is_pending:
+                        status_markers.append("[PENDING]")
+                    elif is_dup:
+                        status_markers.append("[DUPLIKAT]")
+                    elif t.wallet_type == "Fiat":
+                        status_markers.append("[BILANS]")
+                    else:
+                        status_markers.append("[BILANS]")
+
                     # Dla fiat-duplikatów: nawias + gwiazdka
                     if t.wallet_type == "Fiat" and is_dup:
                         chg_str = f"({_fmt_signed(chg)})*"
-                    # Dla fiat-unikalnych: bez nawiasu (liczy się do bilansu)
                     elif t.wallet_type == "Fiat" and not is_dup:
                         chg_str = f"{_fmt_signed(chg)} [FIAT]"
 
@@ -525,6 +536,7 @@ class ReportGenerator:
                     txn_rows.append([
                         t.time[:19] if t.time else "",
                         chg_str,
+                        " ".join(status_markers),
                         reason_display,
                         source_display,
                         t.transaction_id[:20] if t.transaction_id else "—",
@@ -532,20 +544,25 @@ class ReportGenerator:
 
                 if txn_rows:
                     self._add_table(
-                        ["Czas", "Zmiana", "Powód", "Źródło", "TxID"],
+                        ["Czas", "Zmiana", "Status", "Powód", "Źródło", "TxID"],
                         txn_rows,
-                        col_widths=[Inches(1.0), Inches(0.8), Inches(2.8), Inches(1.1), Inches(1.3)])
+                        col_widths=[Inches(1.0), Inches(0.8), Inches(0.7), Inches(2.4), Inches(1.0), Inches(1.3)])
 
-                    # Dodaj legendę, jeśli były duplikaty fiat
+                    # Legenda
                     has_fiat_dup = any(t.wallet_type == "Fiat" and _is_fiat_duplicate(t, confirmed_all) for t in txns)
                     has_fiat_unique = any(t.wallet_type == "Fiat" and not _is_fiat_duplicate(t, confirmed_all) for t in txns)
+                    has_pending = any(_is_pending_transaction(t) for t in txns)
+                    if has_pending:
+                        self._add_paragraph(
+                            "[PENDING] — transakcja niepotwierdzona, NIE wliczana do bilansu.",
+                            color=RGBColor(0x80, 0x60, 0x00))
                     if has_fiat_dup:
                         self._add_paragraph(
-                            "* Wartość w nawiasie to duplikat fiat — pokazana informacyjnie, nie wliczana do bilansu (ten sam ruch jest w logach Spot/Funding).",
+                            "(*) Duplikat fiat — pokazany informacyjnie, NIE wliczany do bilansu (ten sam ruch jest w logach Spot/Funding).",
                             color=RGBColor(0x80, 0x80, 0x80))
                     if has_fiat_unique:
                         self._add_paragraph(
-                            "[FIAT] Transakcja unikalna (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
+                            "[FIAT] [BILANS] — transakcja unikalna (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
                             color=RGBColor(0x00, 0x60, 0x80))
             else:
                 # Waluta w Assets Overview ale bez transakcji (lub tylko fiat)

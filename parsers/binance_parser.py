@@ -23,14 +23,26 @@ from config import BINANCE_SHEETS
 
 
 def _fmt_num(val) -> str:
-    """Formatuje liczbę bez notacji naukowej, obsługuje przecinek dziesiętny."""
+    """Formatuje liczbę bez notacji naukowej, obsługuje przecinek dziesiętny.
+    Obcina nieznaczące zera z końca, nawet jeśli źródło (Excel) je zawiera."""
     if val is None or val == "":
         return ""
+    # Ścieżka string-first: jeśli val wygląda na liczbę z kropką/przecinkiem,
+    # obcinamy zera bez konwersji na float (unikamy artefaktów precyzji float).
+    s_raw = str(val).strip().replace(" ", "").replace("\n", "").replace("\r", "")
+    s = _normalize_decimal(s_raw)
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+        if s == "" or s == "-":
+            s = "0"
+        try:
+            float(s)
+            return s
+        except (ValueError, TypeError):
+            pass
+    # Klasyczna ścieżka float (dla numpy, Decimal, int itp.)
     try:
-        if hasattr(val, "to_eng_string"):
-            f = float(val)
-        else:
-            f = float(val)
+        f = float(val)
         if abs(f) < 1e-12:
             return "0"
         if f == int(f):
@@ -170,7 +182,17 @@ class BinanceReportParser:
                         if ni < len(df) and nj < len(df.columns):
                             btc_val = clean_val(df.iloc[ni, nj])
                             if btc_val and not _is_zero(btc_val):
-                                btc_str = _fmt_num(btc_val).replace("\n", " ").replace("\r", " ").strip()
+                                # Komórka może zawierać BTC + USD w jednym stringu
+                                # (np. "0.00106313000000\n≈$68.0288594586000000").
+                                # Bierzemy tylko pierwszy token który wygląda na liczbę.
+                                raw_str = str(btc_val).replace("\n", " ").replace("\r", " ").strip()
+                                btc_str = ""
+                                for token in raw_str.split():
+                                    if re.match(r'^[\d\.,]+$', token):
+                                        btc_str = _fmt_num(token)
+                                        break
+                                if not btc_str:
+                                    btc_str = _fmt_num(btc_val)
                                 self.identifiers.estimate_total_btc = btc_str
                                 print(f"  Estimate Total Balance(BTC): {self.identifiers.estimate_total_btc}")
                                 break
