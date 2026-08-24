@@ -661,7 +661,7 @@ class BinanceReportParser:
                     currency=fiat_curr,
                     amount=_fmt_num(fiat_amt),
                     change=_fmt_num(f"-{fiat_amt}"),
-                    reason=f"Fiat Deposit (zakup krypto za fiat) | Status: {status or 'N/A'}",
+                    reason=f"[FIAT] Płatność {fiat_curr} za zakup {crypto_curr or 'krypto'} | Status: {status or 'N/A'}",
                     wallet_type="Fiat",
                     source_sheet=sheet_name,
                 )
@@ -674,7 +674,7 @@ class BinanceReportParser:
                     currency=crypto_curr,
                     amount=_fmt_num(crypto_amt),
                     change=_fmt_num(crypto_amt),  # przychód – dodatni
-                    reason=f"Fiat Deposit (otrzymano krypto) | Status: {status or 'N/A'}",
+                    reason=f"[FIAT] Zakup {crypto_curr} za {fiat_curr or 'fiat'} | Status: {status or 'N/A'}",
                     wallet_type="Fiat",
                     source_sheet=sheet_name,
                 )
@@ -728,7 +728,7 @@ class BinanceReportParser:
                         currency=fiat_curr,
                         amount=_fmt_num(fiat_amt),
                         change=_fmt_num(f"-{fiat_amt}"),
-                        reason=f"Fiat Trade BUY | Status: {status or 'N/A'}",
+                        reason=f"[FIAT] Płatność {fiat_curr} za zakup {crypto_curr or 'krypto'} | Status: {status or 'N/A'}",
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
                     )
@@ -739,7 +739,7 @@ class BinanceReportParser:
                         currency=crypto_curr,
                         amount=_fmt_num(crypto_amt),
                         change=_fmt_num(crypto_amt),
-                        reason=f"Fiat Trade BUY (otrzymano krypto) | Status: {status or 'N/A'}",
+                        reason=f"[FIAT] Zakup {crypto_curr} za {fiat_curr or 'fiat'} | Status: {status or 'N/A'}",
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
                     )
@@ -753,7 +753,7 @@ class BinanceReportParser:
                         currency=fiat_curr,
                         amount=_fmt_num(fiat_amt),
                         change=_fmt_num(fiat_amt),
-                        reason=f"Fiat Trade SELL | Status: {status or 'N/A'}",
+                        reason=f"[FIAT] Otrzymano {fiat_curr} ze sprzedaży {crypto_curr or 'krypto'} | Status: {status or 'N/A'}",
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
                     )
@@ -764,7 +764,7 @@ class BinanceReportParser:
                         currency=crypto_curr,
                         amount=_fmt_num(crypto_amt),
                         change=_fmt_num(f"-{crypto_amt}"),
-                        reason=f"Fiat Trade SELL (sprzedano krypto) | Status: {status or 'N/A'}",
+                        reason=f"[FIAT] Sprzedaż {crypto_curr} na {fiat_curr or 'fiat'} | Status: {status or 'N/A'}",
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
                     )

@@ -297,7 +297,12 @@ class ReportGenerator:
             self._add_paragraph("Brak danych o saldach walut (wszystkie salda to 0 lub arkusz nie zawiera tabeli).")
 
     def _render_currency_flows(self, r: ExtractedIdentifiers):
-        """Jedna sekcja per waluta — wszystkie transakcje ze wszystkich arkuszy w jednym miejscu."""
+        """Jedna sekcja per waluta — wszystkie transakcje ze wszystkich arkuszy w jednym miejscu.
+
+        Uwaga: Transakcje z arkuszy Fiat (Fiat Deposit, Fiat Trades) są wyświetlane w tabeli
+        dla czytelności (widać źródło zakupu), ale NIE są liczone do bilansu, ponieważ
+        ten sam ruch jest już odzwierciedlony w Spot Asset Log / Funding Asset Log.
+        """
         all_txns = (r.spot_transactions + r.funding_transactions +
                     r.deposit_transactions + r.withdrawal_transactions +
                     r.fiat_deposit_transactions + r.fiat_trade_transactions)
@@ -307,8 +312,9 @@ class ReportGenerator:
         self._add_heading("Wykaz ruchów walut (wszystkie źródła)", level=3)
         self._add_paragraph(
             "Poniższa analiza łączy dane ze wszystkich arkuszy transakcyjnych: Spot Asset Log, Funding Asset Log, "
-            "Deposit History, Withdrawal History oraz OTC Trading. Dla każdej waluty pokazano pełen bilans ruchów "
-            "z podziałem na źródło (arkusz).",
+            "Deposit History, Withdrawal History, Fiat Deposit oraz Fiat Trades. Dla każdej waluty pokazano pełen bilans ruchów. "
+            "Transakcje oznaczone [FIAT] w kolumnie Powód pochodzą z arkuszy fiat i są pokazane wyłącznie informacyjnie — "
+            "nie wpływają na bilans, ponieważ ten sam ruch jest już uwzględniony w logach Spot/Funding.",
             color=RGBColor(0x60, 0x60, 0x60))
 
         # Zbierz wszystkie waluty: z transakcji + z Assets Overview
@@ -318,7 +324,10 @@ class ReportGenerator:
         confirmed_all = [t for t in all_txns if not _is_pending_transaction(t)]
         pending_all = [t for t in all_txns if _is_pending_transaction(t)]
 
-        # Grupowanie transakcji per waluta
+        # === BILANS: tylko transakcje NIE-fiat (żeby nie dublować logów spot) ===
+        confirmed_for_balance = [t for t in confirmed_all if t.wallet_type != "Fiat"]
+
+        # Grupowanie transakcji per waluta (do wyświetlenia — wszystkie, w tym fiat)
         txns_by_currency: Dict[str, List[AssetTransaction]] = {}
         for t in confirmed_all:
             curr = t.currency.upper() if t.currency else "UNKNOWN"
@@ -345,12 +354,12 @@ class ReportGenerator:
             self._add_paragraph("Brak danych o ruchach walut.")
             return
 
-        # Najpierw skrótowa tabela wszystkich walut
+        # Najpierw skrótowa tabela wszystkich walut (bilans BEZ fiat)
         summary_rows = []
         for curr in all_currencies:
-            txns = txns_by_currency.get(curr, [])
-            total_in = sum(_to_float(t.change) for t in txns if _to_float(t.change) > 0)
-            total_out = sum(abs(_to_float(t.change)) for t in txns if _to_float(t.change) < 0)
+            txns_bal = [t for t in txns_by_currency.get(curr, []) if t.wallet_type != "Fiat"]
+            total_in = sum(_to_float(t.change) for t in txns_bal if _to_float(t.change) > 0)
+            total_out = sum(abs(_to_float(t.change)) for t in txns_bal if _to_float(t.change) < 0)
             netto = total_in - total_out
             bal = balance_map.get(curr)
             bal_str = bal.all_positions if bal else "(brak)"
@@ -374,7 +383,7 @@ class ReportGenerator:
             summary_rows)
 
         self._add_paragraph(
-            "ℹ️ Kolumna 'Różnica' pokazuje różnicę między pełnym bilansem przepływów a saldem z Assets Overview. "
+            "ℹ️ Kolumna 'Różnica' pokazuje różnicę między bilansem przepływów (bez duplikatów fiat) a saldem z Assets Overview. "
             "Jeżeli różnica jest niezerowa, oznacza to że część środków została przeniesiona między portfelami "
             "lub znajduje się w innych produktach (Futures, Earn, Margin, Pool).",
             color=RGBColor(0x00, 0x60, 0x80))
@@ -385,9 +394,10 @@ class ReportGenerator:
             txns = txns_by_currency.get(curr, [])
             bal = balance_map.get(curr)
 
-            # Podsumowanie per waluta
-            total_in = sum(_to_float(t.change) for t in txns if _to_float(t.change) > 0)
-            total_out = sum(abs(_to_float(t.change)) for t in txns if _to_float(t.change) < 0)
+            # Podsumowanie per waluta (BEZ fiat)
+            txns_bal = [t for t in txns if t.wallet_type != "Fiat"]
+            total_in = sum(_to_float(t.change) for t in txns_bal if _to_float(t.change) > 0)
+            total_out = sum(abs(_to_float(t.change)) for t in txns_bal if _to_float(t.change) < 0)
             netto = total_in - total_out
 
             times = [t.time for t in txns if t.time]
@@ -397,13 +407,13 @@ class ReportGenerator:
 
             self._add_paragraph(f"Waluta {curr}:{time_range_str}", bold=True)
 
-            if txns:
+            if txns_bal:
                 summary_row = [[
                     f"+{_fmt(total_in)}",
                     f"-{_fmt(total_out)}",
                     _fmt_signed(netto),
-                    str(sum(1 for t in txns if _to_float(t.change) > 0)),
-                    str(sum(1 for t in txns if _to_float(t.change) < 0)),
+                    str(sum(1 for t in txns_bal if _to_float(t.change) > 0)),
+                    str(sum(1 for t in txns_bal if _to_float(t.change) < 0)),
                 ]]
                 self._add_table(
                     ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
@@ -425,13 +435,19 @@ class ReportGenerator:
                         f"Nie oznacza to debetu — brakuje tu depozytów/wypłat z innych źródeł.",
                         color=RGBColor(0xC0, 0x00, 0x00))
 
-                # Tabela transakcji z kolumną Źródło
+                # Tabela transakcji — WSZYSTKIE (w tym fiat, oznaczone jako info)
                 txn_rows = []
                 for t in sorted(txns, key=lambda x: x.time or ""):
                     chg = _to_float(t.change)
-                    if abs(chg) < 1e-12:
+                    # Pokaż wszystko — fiat też, ale z adnotacją
+                    if abs(chg) < 1e-12 and t.wallet_type != "Fiat":
                         continue
+
                     chg_str = _fmt_signed(chg)
+                    # Dla fiat: pokaż kwotę w nawiasie, żeby było widać, ale nie liczyć do bilansu
+                    if t.wallet_type == "Fiat":
+                        chg_str = f"({_fmt_signed(chg)})*"
+
                     reason_display = t.reason if t.reason else "—"
                     source_display = t.source_sheet if t.source_sheet else t.wallet_type
                     txn_rows.append([
@@ -447,8 +463,15 @@ class ReportGenerator:
                         ["Czas", "Zmiana", "Powód", "Źródło", "TxID"],
                         txn_rows,
                         col_widths=[Inches(1.0), Inches(0.8), Inches(2.8), Inches(1.1), Inches(1.3)])
+
+                    # Dodaj legendę, jeśli były transakcje fiat
+                    has_fiat = any(t.wallet_type == "Fiat" for t in txns)
+                    if has_fiat:
+                        self._add_paragraph(
+                            "* Wartość w nawiasie pochodzi z arkusza Fiat — pokazana informacyjnie, nie wliczana do bilansu (duplikat w logach Spot/Funding).",
+                            color=RGBColor(0x80, 0x80, 0x80))
             else:
-                # Waluta w Assets Overview ale bez transakcji
+                # Waluta w Assets Overview ale bez transakcji (lub tylko fiat)
                 bal_str = bal.all_positions if bal else "(brak)"
                 wallet_str = f" ({bal.wallet_type})" if bal and bal.wallet_type else ""
                 self._add_paragraph(
