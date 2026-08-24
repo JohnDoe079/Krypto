@@ -395,10 +395,11 @@ class ReportGenerator:
             bal = balance_map.get(curr)
 
             # Sprawdź czy w tej walucie są transakcje fiat z obcym User ID
-            known_ids = r.user_ids | r.related_user_ids
+            # Właściciel to TYLKO ID z Customer Information (Basic Information)
+            # Każde inne ID w transakcjach fiat = potencjalne zasilenie z zewnątrz
             foreign_in_curr = set()
             for t in txns:
-                if t.wallet_type == "Fiat" and t.user_id and t.user_id not in known_ids:
+                if t.wallet_type == "Fiat" and t.user_id and t.user_id not in r.user_ids:
                     foreign_in_curr.add(t.user_id)
 
             # Podsumowanie per waluta (BEZ fiat)
@@ -419,6 +420,13 @@ class ReportGenerator:
                     f" ⚠️ UWAGA: Transakcje fiat w tej walucie pochodzą od innego User ID: {', '.join(sorted(foreign_in_curr))}. "
                     f"Może to oznaczać zasilenie konta z zewnętrznego źródła (inny użytkownik / konto powiązane).",
                     color=RGBColor(0xC0, 0x00, 0x00))
+
+            # Zlicz FAIL w tej walucie (z fiat)
+            fail_in_curr = sum(1 for t in txns if t.wallet_type == "Fiat" and t.reason and "Status: fail" in t.reason.lower())
+            if fail_in_curr > 0:
+                self._add_paragraph(
+                    f" ℹ️ W tej walucie wykryto {fail_in_curr} nieudanych transakcji fiat (FAIL) — pominięte w bilansie.",
+                    color=RGBColor(0x80, 0x60, 0x00))
 
             if txns_bal:
                 summary_row = [[
@@ -647,7 +655,9 @@ class ReportGenerator:
                 ("E-maile", r.emails), ("Numery telefonów", r.phones),
                 ("Adresy IP", r.ips), ("Adresy portfeli (krypto)", r.wallet_addresses),
                 ("TXID (hash transakcji)", r.txids), ("BIN karty", r.card_bins),
-                ("Ostatnie 4 cyfry karty", r.card_last4), ("IBAN", r.ibans),
+                ("Ostatnie 4 cyfry karty", r.card_last4),
+                ("Karty płatnicze (sformatowane)", r.formatted_cards),
+                ("IBAN", r.ibans),
                 ("Numery kont", r.account_numbers), ("ID urządzeń", r.device_ids),
                 ("ID Fvideo", r.fvideo_ids), ("UUID BNC", r.bnc_uuids),
                 ("ID zamówień", r.order_ids), ("ID kontrahentów", r.counterparty_ids),

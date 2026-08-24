@@ -82,6 +82,7 @@ class ExtractedIdentifiers:
     txids: Set[str] = field(default_factory=set)
     card_bins: Set[str] = field(default_factory=set)
     card_last4: Set[str] = field(default_factory=set)
+    formatted_cards: Set[str] = field(default_factory=set)  # np. "5355 57** **** 3305"
     ibans: Set[str] = field(default_factory=set)
     account_numbers: Set[str] = field(default_factory=set)
     device_ids: Set[str] = field(default_factory=set)
@@ -126,6 +127,7 @@ class ExtractedIdentifiers:
             "txids": sorted(self.txids),
             "card_bins": sorted(self.card_bins),
             "card_last4": sorted(self.card_last4),
+            "formatted_cards": sorted(self.formatted_cards),
             "ibans": sorted(self.ibans),
             "account_numbers": sorted(self.account_numbers),
             "device_ids": sorted(self.device_ids),
@@ -167,6 +169,7 @@ class ExtractedIdentifiers:
             f"  TXID: {len(self.txids)}",
             f"  BIN kart: {len(self.card_bins)}",
             f"  Ostatnie 4 cyfry kart: {len(self.card_last4)}",
+            f"  Sformatowane karty: {len(self.formatted_cards)}",
             f"  IBAN: {len(self.ibans)}",
             f"  Numery kont: {len(self.account_numbers)}",
             f"  ID urządzeń: {len(self.device_ids)}",
