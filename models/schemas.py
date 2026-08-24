@@ -36,7 +36,7 @@ class AssetBalance:
 
 @dataclass
 class AssetTransaction:
-    """Pojedyncza transakcja z Spot/Funding/Deposit/Withdrawal."""
+    """Pojedyncza transakcja z dowolnego arkusza (Spot/Funding/Deposit/Withdrawal/OTC/P2P/itp)."""
     time: str = ""
     currency: str = ""
     amount: str = ""
@@ -46,7 +46,8 @@ class AssetTransaction:
     change: str = ""
     reason: str = ""
     transaction_id: str = ""
-    wallet_type: str = ""
+    wallet_type: str = ""          # Spot / Funding / Deposit / Withdrawal / OTC / P2P / Pay / Fiat
+    source_sheet: str = ""         # Nazwa oryginalnego arkusza, np. "Spot Asset Log"
 
     def to_dict(self) -> dict:
         return {
@@ -60,6 +61,7 @@ class AssetTransaction:
             "reason": self.reason,
             "transaction_id": self.transaction_id,
             "wallet_type": self.wallet_type,
+            "source_sheet": self.source_sheet,
         }
 
 

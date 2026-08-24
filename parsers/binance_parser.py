@@ -237,12 +237,12 @@ class BinanceReportParser:
         print(f"  Sparsowano {len(self.identifiers.asset_balances)} sald walut (pominięto zera)")
 
     def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
-        self._parse_asset_log(df, "Spot")
+        self._parse_asset_log(df, "Spot", sheet_name)
 
     def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
-        self._parse_asset_log(df, "Funding")
+        self._parse_asset_log(df, "Funding", sheet_name)
 
-    def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str):
+    def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str, sheet_name: str):
         cols = [str(c).strip().lower() for c in df.columns]
         col_map = {}
         for idx, c in enumerate(cols):
@@ -277,11 +277,8 @@ class BinanceReportParser:
             if chg_val is None:
                 amt_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
                 if amt_val:
-                    # Binance Spot Asset Log: Amount JUŻ zawiera znak (+/-)
-                    # Używamy bezpośrednio bez odgadywania z Description
                     chg_val = amt_val
 
-            # Połącz Type (Reason) + Description dla pełniejszego opisu
             reason_parts = []
             if "reason" in col_map:
                 r = clean_val(row.iloc[col_map["reason"]])
@@ -304,6 +301,7 @@ class BinanceReportParser:
                 reason=full_reason,
                 transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
                 wallet_type=wallet_type,
+                source_sheet=sheet_name,
             )
             if txn.time or txn.currency:
                 if wallet_type == "Spot":
@@ -511,6 +509,7 @@ class BinanceReportParser:
                     reason=f"Deposit ({status})" if status else "Deposit",
                     transaction_id=txid,
                     wallet_type="Deposit",
+                    source_sheet=sheet_name,
                 )
                 self.identifiers.deposit_transactions.append(txn)
 
@@ -579,6 +578,7 @@ class BinanceReportParser:
                     reason=f"Withdrawal ({status})" if status else "Withdrawal",
                     transaction_id=txid,
                     wallet_type="Withdrawal",
+                    source_sheet=sheet_name,
                 )
                 self.identifiers.withdrawal_transactions.append(txn)
 
@@ -754,6 +754,7 @@ class BinanceReportParser:
                     change=_fmt_num(base_chg),
                     reason=f"OTC {side} {base}{quote} ({status})",
                     wallet_type="OTC",
+                    source_sheet=sheet_name,
                 )
                 self.identifiers.spot_transactions.append(txn_base)
 
@@ -773,6 +774,7 @@ class BinanceReportParser:
                         change=_fmt_num(quote_chg),
                         reason=f"OTC {side} {base}{quote} ({status})",
                         wallet_type="OTC",
+                        source_sheet=sheet_name,
                     )
                     self.identifiers.spot_transactions.append(txn_quote)
 

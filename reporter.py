@@ -223,11 +223,6 @@ class ReportGenerator:
                  for col, val in rest]
         return rows
 
-    def _add_time_range_for_sheet(self, r: ExtractedIdentifiers, sheet_name: str):
-        if sheet_name in r.time_ranges:
-            tr = r.time_ranges[sheet_name]
-            self._add_paragraph(f"  Zakres czasowy: {tr['from']} → {tr['to']}", color=RGBColor(0x40, 0x40, 0x40))
-
     def _render_customer_info(self, r: ExtractedIdentifiers):
         if not r.customer_info_sections:
             return
@@ -301,147 +296,73 @@ class ReportGenerator:
         else:
             self._add_paragraph("Brak danych o saldach walut (wszystkie salda to 0 lub arkusz nie zawiera tabeli).")
 
-    def _render_transaction_section(self, r: ExtractedIdentifiers, transactions: List[AssetTransaction],
-                                     title: str, sheet_name: str, note: str = None):
-        if not transactions:
+    def _render_currency_flows(self, r: ExtractedIdentifiers):
+        """Jedna sekcja per waluta — wszystkie transakcje ze wszystkich arkuszy w jednym miejscu."""
+        all_txns = (r.spot_transactions + r.funding_transactions +
+                    r.deposit_transactions + r.withdrawal_transactions)
+        if not all_txns and not r.asset_balances:
             return
-        self._add_heading(title, level=3)
-        self._add_time_range_for_sheet(r, sheet_name)
 
-        if note:
-            self._add_paragraph(note, color=RGBColor(0x60, 0x60, 0x60))
+        self._add_heading("Wykaz ruchów walut (wszystkie źródła)", level=3)
+        self._add_paragraph(
+            "Poniższa analiza łączy dane ze wszystkich arkuszy transakcyjnych: Spot Asset Log, Funding Asset Log, "
+            "Deposit History, Withdrawal History oraz OTC Trading. Dla każdej waluty pokazano pełen bilans ruchów "
+            "z podziałem na źródło (arkusz).",
+            color=RGBColor(0x60, 0x60, 0x60))
 
-        confirmed = [t for t in transactions if not _is_pending_transaction(t)]
-        pending_count = len(transactions) - len(confirmed)
-        if pending_count > 0:
-            self._add_paragraph(f"Pominięto {pending_count} transakcji pending/niepotwierdzonych.",
-                                color=RGBColor(0x80, 0x60, 0x00))
+        # Zbierz wszystkie waluty: z transakcji + z Assets Overview
+        currencies_from_txns = set()
+        currencies_from_balances = set()
 
-        flow = _sum_asset_flow(confirmed)
+        confirmed_all = [t for t in all_txns if not _is_pending_transaction(t)]
+        pending_all = [t for t in all_txns if _is_pending_transaction(t)]
 
-        txns_by_currency = {}
-        for t in sorted(confirmed, key=lambda x: x.time or ""):
+        # Grupowanie transakcji per waluta
+        txns_by_currency: Dict[str, List[AssetTransaction]] = {}
+        for t in confirmed_all:
             curr = t.currency.upper() if t.currency else "UNKNOWN"
+            currencies_from_txns.add(curr)
             if curr not in txns_by_currency:
                 txns_by_currency[curr] = []
             txns_by_currency[curr].append(t)
 
-        if not flow:
+        # Waluty z Assets Overview
+        balance_map: Dict[str, AssetBalance] = {}
+        for b in r.asset_balances:
+            curr = b.currency_code.upper()
+            currencies_from_balances.add(curr)
+            balance_map[curr] = b
+
+        all_currencies = sorted(currencies_from_txns | currencies_from_balances)
+
+        if pending_all:
             self._add_paragraph(
-                "Brak wykrytych przepływów (kolumna Change/Amount może być pusta lub zawierać same zera).",
+                f"Pominięto {len(pending_all)} transakcji pending/niepotwierdzonych (nieuwzględnionych w bilansie).",
                 color=RGBColor(0x80, 0x60, 0x00))
+
+        if not all_currencies:
+            self._add_paragraph("Brak danych o ruchach walut.")
             return
 
-        self._add_paragraph(
-            "Uwaga: Saldo poniżej to BILANS ZMIAN w okresie raportu (przychody minus rozchody). "
-            "Jeżeli saldo jest ujemne, oznacza to że w okresie raportu rozchody przewyższyły przychody.",
-            color=RGBColor(0x60, 0x60, 0x60))
-
-        for curr in sorted(flow.keys()):
-            data = flow[curr]
-            netto = data["in"] - data["out"]
-            curr_txns = txns_by_currency.get(curr, [])
-
-            times = [t.time for t in curr_txns if t.time]
-            time_range_str = ""
-            if times:
-                time_range_str = f" (zakres: {min(times)[:19]} → {max(times)[:19]})"
-
-            self._add_paragraph(f"Waluta {curr}:{time_range_str}", bold=True)
-            summary_row = [[
-                f"+{_fmt(data['in'])}",
-                f"-{_fmt(data['out'])}",
-                _fmt_signed(netto),
-                str(data["count_in"]),
-                str(data["count_out"]),
-            ]]
-            self._add_table(
-                ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
-                summary_row)
-
-            asset_balance = None
-            for b in r.asset_balances:
-                if b.currency_code.upper() == curr:
-                    asset_balance = b
-                    break
-
-            if asset_balance:
-                bal_all = _to_float(asset_balance.all_positions)
-                if abs(netto - bal_all) > 1e-8:
-                    diff = bal_all - netto
-                    self._add_paragraph(
-                        f" ℹ️ Różnica między logiem ({_fmt_signed(netto)}) a Assets Overview ({_fmt_signed(bal_all)}): {_fmt_signed(diff)} {curr}. "
-                        f"Brakujące transakcje (depozyty, wypłaty, transfery) znajdują się w innych arkuszach.",
-                        color=RGBColor(0x00, 0x60, 0x80))
-
-            if netto < -1e-12:
-                self._add_paragraph(
-                    f" ⚠️ UWAGA: Ujemne saldo w logu ({_fmt_signed(netto)}). "
-                    f"Oznacza to że w okresie objętym tym logiem rozchody przewyższyły przychody. "
-                    f"Nie oznacza to debetu — brakuje tu depozytów/wypłat z arkuszy Deposit/Withdrawal History.",
-                    color=RGBColor(0xC0, 0x00, 0x00))
-
-            nonzero_txns = [t for t in curr_txns if abs(_to_float(t.change)) > 1e-12]
-            if nonzero_txns:
-                txn_rows = []
-                for t in nonzero_txns:
-                    chg = _to_float(t.change)
-                    chg_str = _fmt_signed(chg)
-                    reason_display = t.reason if t.reason else "—"
-                    txn_rows.append([
-                        t.time[:19] if t.time else "",
-                        chg_str,
-                        reason_display,
-                        t.transaction_id[:20] if t.transaction_id else "—",
-                    ])
-                self._add_table(
-                    ["Czas", "Zmiana", "Powód", "TxID"],
-                    txn_rows,
-                    col_widths=[Inches(1.1), Inches(0.9), Inches(3.2), Inches(1.8)])
-            self._add_paragraph("")
-
-    def _render_combined_flow(self, r: ExtractedIdentifiers):
-        """Łączy wszystkie transakcje (Spot + Funding + Deposit + Withdrawal) i pokazuje pełny bilans per waluta."""
-        all_txns = (r.spot_transactions + r.funding_transactions +
-                    r.deposit_transactions + r.withdrawal_transactions)
-        if not all_txns:
-            return
-
-        self._add_heading("Pełny bilans przepływów (wszystkie źródła)", level=3)
-        self._add_paragraph(
-            "Poniższa tabela łączy dane ze wszystkich arkuszy: Spot Asset Log, Funding Asset Log, "
-            "Deposit History oraz Withdrawal History. Dla każdej waluty pokazuje całkowite przychody, rozchody i netto.",
-            color=RGBColor(0x60, 0x60, 0x60))
-
-        confirmed = [t for t in all_txns if not _is_pending_transaction(t)]
-        flow = _sum_asset_flow(confirmed)
-
-        if not flow:
-            self._add_paragraph("Brak potwierdzonych przepływów.")
-            return
-
-        rows = []
-        for curr in sorted(flow.keys()):
-            data = flow[curr]
-            netto = data["in"] - data["out"]
-
-            asset_balance = None
-            for b in r.asset_balances:
-                if b.currency_code.upper() == curr:
-                    asset_balance = b
-                    break
-
-            bal_str = asset_balance.all_positions if asset_balance else "(brak)"
+        # Najpierw skrótowa tabela wszystkich walut
+        summary_rows = []
+        for curr in all_currencies:
+            txns = txns_by_currency.get(curr, [])
+            total_in = sum(_to_float(t.change) for t in txns if _to_float(t.change) > 0)
+            total_out = sum(abs(_to_float(t.change)) for t in txns if _to_float(t.change) < 0)
+            netto = total_in - total_out
+            bal = balance_map.get(curr)
+            bal_str = bal.all_positions if bal else "(brak)"
             diff_str = ""
-            if asset_balance:
-                bal_all = _to_float(asset_balance.all_positions)
-                diff = bal_all - netto
-                diff_str = _fmt_signed(diff)
-
-            rows.append([
+            if bal:
+                bal_f = _to_float(bal.all_positions)
+                diff = bal_f - netto
+                if abs(diff) > 1e-8:
+                    diff_str = _fmt_signed(diff)
+            summary_rows.append([
                 curr,
-                f"+{_fmt(data['in'])}",
-                f"-{_fmt(data['out'])}",
+                f"+{_fmt(total_in)}",
+                f"-{_fmt(total_out)}",
                 _fmt_signed(netto),
                 bal_str,
                 diff_str,
@@ -449,13 +370,91 @@ class ReportGenerator:
 
         self._add_table(
             ["Waluta", "Przychody (wszystkie)", "Rozchody (wszystkie)", "Netto", "Saldo z Assets Overview", "Różnica"],
-            rows)
+            summary_rows)
 
         self._add_paragraph(
             "ℹ️ Kolumna 'Różnica' pokazuje różnicę między pełnym bilansem przepływów a saldem z Assets Overview. "
-            "Jeżeli różnica jest niezerowa, oznacza to że część środków została przeniesiona między portfelami (np. Spot → Funding) "
+            "Jeżeli różnica jest niezerowa, oznacza to że część środków została przeniesiona między portfelami "
             "lub znajduje się w innych produktach (Futures, Earn, Margin, Pool).",
             color=RGBColor(0x00, 0x60, 0x80))
+        self._add_paragraph("")
+
+        # Szczegóły per waluta
+        for curr in all_currencies:
+            txns = txns_by_currency.get(curr, [])
+            bal = balance_map.get(curr)
+
+            # Podsumowanie per waluta
+            total_in = sum(_to_float(t.change) for t in txns if _to_float(t.change) > 0)
+            total_out = sum(abs(_to_float(t.change)) for t in txns if _to_float(t.change) < 0)
+            netto = total_in - total_out
+
+            times = [t.time for t in txns if t.time]
+            time_range_str = ""
+            if times:
+                time_range_str = f" (zakres: {min(times)[:19]} → {max(times)[:19]})"
+
+            self._add_paragraph(f"Waluta {curr}:{time_range_str}", bold=True)
+
+            if txns:
+                summary_row = [[
+                    f"+{_fmt(total_in)}",
+                    f"-{_fmt(total_out)}",
+                    _fmt_signed(netto),
+                    str(sum(1 for t in txns if _to_float(t.change) > 0)),
+                    str(sum(1 for t in txns if _to_float(t.change) < 0)),
+                ]]
+                self._add_table(
+                    ["Przychody", "Rozchody", "Saldo", "L. przych.", "L. rozch."],
+                    summary_row)
+
+                if bal:
+                    bal_f = _to_float(bal.all_positions)
+                    if abs(netto - bal_f) > 1e-8:
+                        diff = bal_f - netto
+                        self._add_paragraph(
+                            f" ℹ️ Różnica między logiem ({_fmt_signed(netto)}) a Assets Overview ({_fmt_signed(bal_f)}): {_fmt_signed(diff)} {curr}. "
+                            f"Brakujące transakcje (depozyty, wypłaty, transfery między portfelami) znajdują się w innych arkuszach lub produktach.",
+                            color=RGBColor(0x00, 0x60, 0x80))
+
+                if netto < -1e-12:
+                    self._add_paragraph(
+                        f" ⚠️ UWAGA: Ujemne saldo w logu ({_fmt_signed(netto)}). "
+                        f"Oznacza to że w okresie objętym raportem rozchody przewyższyły przychody. "
+                        f"Nie oznacza to debetu — brakuje tu depozytów/wypłat z innych źródeł.",
+                        color=RGBColor(0xC0, 0x00, 0x00))
+
+                # Tabela transakcji z kolumną Źródło
+                txn_rows = []
+                for t in sorted(txns, key=lambda x: x.time or ""):
+                    chg = _to_float(t.change)
+                    if abs(chg) < 1e-12:
+                        continue
+                    chg_str = _fmt_signed(chg)
+                    reason_display = t.reason if t.reason else "—"
+                    source_display = t.source_sheet if t.source_sheet else t.wallet_type
+                    txn_rows.append([
+                        t.time[:19] if t.time else "",
+                        chg_str,
+                        reason_display,
+                        source_display,
+                        t.transaction_id[:20] if t.transaction_id else "—",
+                    ])
+
+                if txn_rows:
+                    self._add_table(
+                        ["Czas", "Zmiana", "Powód", "Źródło", "TxID"],
+                        txn_rows,
+                        col_widths=[Inches(1.0), Inches(0.8), Inches(2.8), Inches(1.1), Inches(1.3)])
+            else:
+                # Waluta w Assets Overview ale bez transakcji
+                bal_str = bal.all_positions if bal else "(brak)"
+                wallet_str = f" ({bal.wallet_type})" if bal and bal.wallet_type else ""
+                self._add_paragraph(
+                    f"Brak transakcji we wszystkich logach. Saldo z Assets Overview: {_fmt_signed(_to_float(bal_str))} {curr}{wallet_str}.",
+                    color=RGBColor(0x60, 0x60, 0x60))
+
+            self._add_paragraph("")
 
     def generate(self, reports: List[ExtractedIdentifiers], file_map: Dict[str, str]):
         # ===== STRONA TYTUŁOWA =====
@@ -548,6 +547,7 @@ class ReportGenerator:
                     bold=True, color=RGBColor(0x00, 0x40, 0x80))
             self._add_paragraph("")
 
+            # Sekcje statyczne
             for sheet_name in r.parsed_sheets:
                 if sheet_name == "Customer Information":
                     self._render_customer_info(r)
@@ -555,26 +555,10 @@ class ReportGenerator:
                     self._render_kyc(r)
                 elif sheet_name == "Assets Overview":
                     self._render_assets_overview(r)
-                elif sheet_name == "Spot Asset Log":
-                    self._render_transaction_section(r, r.spot_transactions,
-                        "Spot Asset Log (Historia ruchów Spot)", "Spot Asset Log",
-                        "Uwaga: Ponizszy log pokazuje ruchy środków (wpłaty, wypłaty, transfery, rozliczenia). "
-                        "Szczegóły kupna/sprzedaży (cena, kontrahent) znajdują się w arkuszu 'Order History'. "
-                        "Szczegóły wpłat/wypłat (adresy, TXID) znajdują się w 'Deposit/Withdrawal History'.")
-                elif sheet_name == "Funding Asset Log":
-                    self._render_transaction_section(r, r.funding_transactions,
-                        "Funding Asset Log (Historia ruchów Funding)", "Funding Asset Log",
-                        "Uwaga: Funding Wallet obsługuje P2P, Binance Pay, Binance Card i inne usługi.")
-                elif sheet_name == "Deposit History":
-                    self._render_transaction_section(r, r.deposit_transactions,
-                        "Deposit History (Historia wpłat)", "Deposit History",
-                        "Uwaga: Wpłaty z zewnętrznych adresów blockchain lub z innych kont Binance.")
-                elif sheet_name == "Withdrawal History":
-                    self._render_transaction_section(r, r.withdrawal_transactions,
-                        "Withdrawal History (Historia wypłat)", "Withdrawal History",
-                        "Uwaga: Wypłaty na zewnętrzne adresy blockchain lub do innych kont Binance.")
 
-            self._render_combined_flow(r)
+            # Nowa sekcja transakcyjna — per waluta, wszystkie źródła razem
+            self._render_currency_flows(r)
+
             self.doc.add_page_break()
 
         # ===== 3. PORÓWNANIE =====
