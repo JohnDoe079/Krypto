@@ -325,6 +325,8 @@ class ReportGenerator:
         self._add_heading("Assets Overview (Przegląd aktywów)", level=3)
         if r.estimate_total_btc:
             self._add_paragraph(f"Estimate Total Balance (BTC): {r.estimate_total_btc}", bold=True)
+        if r.estimate_total_usdt:
+            self._add_paragraph(f"Estimate Total Balance (USD): ≈${r.estimate_total_usdt}", bold=True)
         if r.asset_balances:
             bal_rows = []
             for b in r.asset_balances:

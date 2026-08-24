@@ -31,6 +31,20 @@ def _fmt_num(val) -> str:
     # obcinamy zera bez konwersji na float (unikamy artefaktów precyzji float).
     s_raw = str(val).strip().replace(" ", "").replace("\n", "").replace("\r", "")
     s = _normalize_decimal(s_raw)
+
+    # Notacja naukowa (np. 9.09e-06 z numpy float64) — przejdź przez float
+    if 'e' in s.lower():
+        try:
+            f = float(s)
+            if abs(f) < 1e-12:
+                return "0"
+            if f == int(f):
+                return str(int(f))
+            s = f"{f:.12f}".rstrip("0").rstrip(".")
+            return s
+        except (ValueError, TypeError):
+            return str(val).strip()
+
     if "." in s:
         s = s.rstrip("0").rstrip(".")
         if s == "" or s == "-":
@@ -144,20 +158,26 @@ class BinanceReportParser:
     def _parse_sheet(self, sheet_name: str):
         if sheet_name == "Customer Information":
             df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None, engine="openpyxl")
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy (header=None)")
             self._parse_customer_info_raw(df)
             self._add_time_range(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
         elif sheet_name == "KYC Documents":
             df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None, engine="openpyxl")
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy (header=None)")
             self._parse_kyc_documents(df)
             self._add_time_range(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
         elif sheet_name == "Assets Overview":
             df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None, engine="openpyxl")
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy (header=None)")
             self._parse_assets_overview(df)
             self.identifiers.parsed_sheets.append(sheet_name)
         else:
             df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=0, engine="openpyxl")
+            cols = [str(c).strip() for c in df.columns]
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
+            print(f"    Kolumny: {cols}")
             internal_name = BINANCE_SHEETS.get(sheet_name)
             if internal_name:
                 method_name = f"_parse_{internal_name}"
@@ -184,17 +204,26 @@ class BinanceReportParser:
                             if btc_val and not _is_zero(btc_val):
                                 # Komórka może zawierać BTC + USD w jednym stringu
                                 # (np. "0.00106313000000\n≈$68.0288594586000000").
-                                # Bierzemy tylko pierwszy token który wygląda na liczbę.
+                                # Wyciągamy obie liczby: pierwsza = BTC, druga = USD.
                                 raw_str = str(btc_val).replace("\n", " ").replace("\r", " ").strip()
+                                tokens = raw_str.split()
                                 btc_str = ""
-                                for token in raw_str.split():
+                                usd_str = ""
+                                for token in tokens:
                                     if re.match(r'^[\d\.,]+$', token):
-                                        btc_str = _fmt_num(token)
-                                        break
+                                        if not btc_str:
+                                            btc_str = _fmt_num(token)
+                                        elif not usd_str:
+                                            usd_str = _fmt_num(token)
+                                            break
                                 if not btc_str:
                                     btc_str = _fmt_num(btc_val)
                                 self.identifiers.estimate_total_btc = btc_str
+                                if usd_str:
+                                    self.identifiers.estimate_total_usdt = usd_str
                                 print(f"  Estimate Total Balance(BTC): {self.identifiers.estimate_total_btc}")
+                                if self.identifiers.estimate_total_usdt:
+                                    print(f"  Estimate Total Balance(USD): ≈${self.identifiers.estimate_total_usdt}")
                                 break
 
         current_wallet = "Spot"
