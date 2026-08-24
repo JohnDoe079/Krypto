@@ -257,8 +257,13 @@ class BinanceReportParser:
 
     def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
         self._parse_asset_log(df, "Funding", sheet_name)
-
     def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str, sheet_name: str):
+        """Parsuje Spot Asset Log lub Funding Asset Log z grupowaniem po Transaction ID.
+
+        Binance zapisuje jedną transakcję spot jako wiele wierszy (np. 3 wiersze:
+        fee w BTC, zapłata w PLN, kupno BTC). Grupujemy je po Transaction ID,
+        aby prawidłowo rozliczyć bilans i nie pominąć żadnego wiersza.
+        """
         cols = [str(c).strip().lower() for c in df.columns]
         col_map = {}
         for idx, c in enumerate(cols):
@@ -284,60 +289,116 @@ class BinanceReportParser:
                 col_map["available"] = idx
             elif "transaction id" in c or "txid" in c or "tx id" in c:
                 col_map["transaction_id"] = idx
+            elif "user id" in c or "userid" in c:
+                col_map["user_id"] = idx
+            elif "order id" in c or "orderid" in c or "commission id" in c:
+                col_map["order_id"] = idx
 
         print(f"  Kolumny Asset Log ({wallet_type}): {list(col_map.keys())}")
         print(f"  Wszystkie kolumny w arkuszu: {list(df.columns)}")
 
+        # --- Faza 1: Zbierz wszystkie wiersze do listy dict ---
+        raw_rows = []
         for _, row in df.iterrows():
-            chg_val = clean_val(row.iloc[col_map.get("change", 0)]) if "change" in col_map else None
-            if chg_val is None:
-                amt_val = clean_val(row.iloc[col_map.get("amount", 0)]) if "amount" in col_map else None
-                if amt_val:
-                    chg_val = amt_val
+            r = {}
+            for key, idx_col in col_map.items():
+                val = clean_val(row.iloc[idx_col]) if idx_col < len(row) else None
+                r[key] = val
+            raw_rows.append(r)
 
-            reason_parts = []
-            if "reason" in col_map:
-                r = clean_val(row.iloc[col_map["reason"]])
-                if r:
-                    reason_parts.append(str(r))
-            if "description" in col_map:
-                d = clean_val(row.iloc[col_map["description"]])
-                if d:
-                    reason_parts.append(str(d))
-            full_reason = " | ".join(reason_parts) if reason_parts else ""
+        # --- Faza 2: Grupuj po Transaction ID ---
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for r in raw_rows:
+            txid = str(r.get("transaction_id", "")).strip() if r.get("transaction_id") else ""
+            groups[txid].append(r)
 
-            txn = AssetTransaction(
-                time=str(clean_val(row.iloc[col_map.get("time", 0)])) if "time" in col_map else "",
-                currency=str(clean_val(row.iloc[col_map.get("currency", 0)])) if "currency" in col_map else "",
-                amount=_fmt_num(clean_val(row.iloc[col_map.get("amount", 0)])) if "amount" in col_map else "",
-                locked=_fmt_num(clean_val(row.iloc[col_map.get("locked", 0)])) if "locked" in col_map else "",
-                freeze=_fmt_num(clean_val(row.iloc[col_map.get("freeze", 0)])) if "freeze" in col_map else "",
-                processing=_fmt_num(clean_val(row.iloc[col_map.get("processing", 0)])) if "processing" in col_map else "",
-                change=_fmt_num(chg_val) if chg_val else "",
-                reason=full_reason,
-                transaction_id=str(clean_val(row.iloc[col_map.get("transaction_id", 0)])) if "transaction_id" in col_map else "",
-                wallet_type=wallet_type,
-                source_sheet=sheet_name,
-            )
-            if txn.time or txn.currency:
-                if wallet_type == "Spot":
-                    self.identifiers.spot_transactions.append(txn)
+        # --- Faza 3: Przetwórz każdą grupę ---
+        for txid, rows in groups.items():
+            is_group = len(rows) > 1 and txid != ""
+            group_desc = ""
+            if is_group:
+                # Określ typ grupy na podstawie Description/Type
+                descriptions = set()
+                types = set()
+                for r in rows:
+                    if r.get("description"):
+                        descriptions.add(str(r["description"]).strip())
+                    if r.get("reason"):
+                        types.add(str(r["reason"]).strip())
+
+                # Klasyfikacja grupy
+                has_buy = any("bought" in t.lower() or "buy" in t.lower() for t in types)
+                has_sell = any("sell" in t.lower() or "sold" in t.lower() for t in types)
+                has_fee = any("fee" in d.lower() for d in descriptions)
+                has_expenses = any("expenses" in d.lower() for d in descriptions)
+                has_income = any("income" in d.lower() for d in descriptions)
+
+                if has_buy and has_expenses:
+                    group_desc = f"[GRUPA {txid}] Zakup spot (buy)"
+                elif has_sell and has_income:
+                    group_desc = f"[GRUPA {txid}] Sprzedaż spot (sell)"
+                elif has_buy:
+                    group_desc = f"[GRUPA {txid}] Zakup spot"
+                elif has_sell:
+                    group_desc = f"[GRUPA {txid}] Sprzedaż spot"
                 else:
-                    self.identifiers.funding_transactions.append(txn)
+                    group_desc = f"[GRUPA {txid}] Transakcja złożona"
+
+            for r in rows:
+                # change = Amount (zawiera znak +/-)
+                chg_val = r.get("change")
+                if chg_val is None:
+                    chg_val = r.get("amount")
+
+                # reason = Type + " | " + Description
+                reason_parts = []
+                if r.get("reason"):
+                    reason_parts.append(str(r["reason"]))
+                if r.get("description"):
+                    reason_parts.append(str(r["description"]))
+                full_reason = " | ".join(reason_parts) if reason_parts else ""
+
+                if is_group and group_desc:
+                    full_reason = f"{group_desc} | {full_reason}"
+
+                txn = AssetTransaction(
+                    time=str(r.get("time", "")) if r.get("time") else "",
+                    currency=str(r.get("currency", "")) if r.get("currency") else "",
+                    amount=_fmt_num(r.get("amount")) if r.get("amount") else "",
+                    locked=_fmt_num(r.get("locked")) if r.get("locked") else "",
+                    freeze=_fmt_num(r.get("freeze")) if r.get("freeze") else "",
+                    processing=_fmt_num(r.get("processing")) if r.get("processing") else "",
+                    change=_fmt_num(chg_val) if chg_val else "",
+                    reason=full_reason,
+                    transaction_id=txid if txid else str(r.get("order_id", "")),
+                    wallet_type=wallet_type,
+                    source_sheet=sheet_name,
+                    user_id=str(r.get("user_id", "")) if r.get("user_id") else "",
+                )
+                if txn.time or txn.currency:
+                    if wallet_type == "Spot":
+                        self.identifiers.spot_transactions.append(txn)
+                    else:
+                        self.identifiers.funding_transactions.append(txn)
+
+                # Ekstrakcja identyfikatorów
+                if r.get("user_id"):
+                    self._add_related_user_id(r["user_id"])
+                if r.get("order_id"):
+                    v = clean_val(r["order_id"])
+                    if v:
+                        self.identifiers.order_ids.add(str(v))
 
         count = len(self.identifiers.spot_transactions) if wallet_type == "Spot" else len(self.identifiers.funding_transactions)
-        print(f"  Sparsowano {count} transakcji {wallet_type}")
+        print(f"  Sparsowano {count} transakcji {wallet_type} (w tym {len([g for g in groups.values() if len(g)>1])} grup po Transaction ID)")
 
+        # Dodaj Transaction IDs do zbioru
         if "Transaction ID" in df.columns:
             for v in df["Transaction ID"].dropna():
                 v = clean_val(v)
                 if v:
                     self.identifiers.transaction_ids.add(v)
-        if "User ID" in df.columns:
-            for v in df["User ID"].dropna():
-                v = clean_val(v)
-                if v:
-                    self._add_related_user_id(v)
 
     def _parse_customer_info_raw(self, df: pd.DataFrame):
         sections = {}
