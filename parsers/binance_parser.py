@@ -90,6 +90,20 @@ class BinanceReportParser:
             print(f"  [!] Nieznane arkusze (sparsowane generycznie): {', '.join(self.identifiers.unknown_sheets)}")
 
         self._dedup_phones()
+
+        # Sprawdź czy w transakcjach fiat są inne User ID (może być zasilenie z innego konta)
+        all_fiat = self.identifiers.fiat_deposit_transactions + self.identifiers.fiat_trade_transactions
+        foreign_user_ids = set()
+        for t in all_fiat:
+            if t.user_id and t.user_id not in self.identifiers.user_ids and t.user_id not in self.identifiers.related_user_ids:
+                foreign_user_ids.add(t.user_id)
+        if foreign_user_ids:
+            print(f"  ⚠️  W transakcjach fiat wykryto User ID inne niż właściciel konta: {', '.join(sorted(foreign_user_ids))}")
+            for uid in foreign_user_ids:
+                self.identifiers.related_user_ids.add(uid)
+        elif all_fiat:
+            print(f"  ✓ Wszystkie transakcje fiat pochodzą od właściciela konta.")
+
         return self.identifiers
 
     def _dedup_phones(self):
@@ -654,6 +668,9 @@ class BinanceReportParser:
             if not crypto_amt:
                 crypto_amt = clean_val(row.get("Crypto Amount")) if "Crypto Amount" in df.columns else None
 
+            user_id = str(clean_val(row.get("User Id"))) if "User Id" in df.columns else ""
+            order_id = str(clean_val(row.get("Order Id"))) if "Order Id" in df.columns else ""
+
             # Rozchód fiat (użytkownik płaci)
             if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
                 txn_fiat = AssetTransaction(
@@ -662,8 +679,10 @@ class BinanceReportParser:
                     amount=_fmt_num(fiat_amt),
                     change=_fmt_num(f"-{fiat_amt}"),
                     reason=f"[FIAT] Płatność {fiat_curr} za zakup {crypto_curr or 'krypto'} | Status: {status or 'N/A'}",
+                    transaction_id=order_id,
                     wallet_type="Fiat",
                     source_sheet=sheet_name,
+                    user_id=user_id,
                 )
                 self.identifiers.fiat_deposit_transactions.append(txn_fiat)
 
@@ -675,8 +694,10 @@ class BinanceReportParser:
                     amount=_fmt_num(crypto_amt),
                     change=_fmt_num(crypto_amt),  # przychód – dodatni
                     reason=f"[FIAT] Zakup {crypto_curr} za {fiat_curr or 'fiat'} | Status: {status or 'N/A'}",
+                    transaction_id=order_id,
                     wallet_type="Fiat",
                     source_sheet=sheet_name,
+                    user_id=user_id,
                 )
                 self.identifiers.fiat_deposit_transactions.append(txn_crypto)
 
@@ -720,6 +741,9 @@ class BinanceReportParser:
             is_buy = business_type in ["BUY", ""] or "BUY" in business_type
             is_sell = business_type == "SELL" or "SELL" in business_type
 
+            user_id = str(clean_val(row.get("User Id"))) if "User Id" in df.columns else ""
+            order_id = str(clean_val(row.get("Order Id"))) if "Order Id" in df.columns else ""
+
             if is_buy:
                 # Rozchód fiat, przychód krypto
                 if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
@@ -729,8 +753,10 @@ class BinanceReportParser:
                         amount=_fmt_num(fiat_amt),
                         change=_fmt_num(f"-{fiat_amt}"),
                         reason=f"[FIAT] Płatność {fiat_curr} za zakup {crypto_curr or 'krypto'} | Status: {status or 'N/A'}",
+                        transaction_id=order_id,
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
+                        user_id=user_id,
                     )
                     self.identifiers.fiat_trade_transactions.append(txn_fiat)
                 if crypto_curr and crypto_amt and not _is_zero(crypto_amt):
@@ -740,8 +766,10 @@ class BinanceReportParser:
                         amount=_fmt_num(crypto_amt),
                         change=_fmt_num(crypto_amt),
                         reason=f"[FIAT] Zakup {crypto_curr} za {fiat_curr or 'fiat'} | Status: {status or 'N/A'}",
+                        transaction_id=order_id,
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
+                        user_id=user_id,
                     )
                     self.identifiers.fiat_trade_transactions.append(txn_crypto)
 
@@ -754,8 +782,10 @@ class BinanceReportParser:
                         amount=_fmt_num(fiat_amt),
                         change=_fmt_num(fiat_amt),
                         reason=f"[FIAT] Otrzymano {fiat_curr} ze sprzedaży {crypto_curr or 'krypto'} | Status: {status or 'N/A'}",
+                        transaction_id=order_id,
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
+                        user_id=user_id,
                     )
                     self.identifiers.fiat_trade_transactions.append(txn_fiat)
                 if crypto_curr and crypto_amt and not _is_zero(crypto_amt):
@@ -765,8 +795,10 @@ class BinanceReportParser:
                         amount=_fmt_num(crypto_amt),
                         change=_fmt_num(f"-{crypto_amt}"),
                         reason=f"[FIAT] Sprzedaż {crypto_curr} na {fiat_curr or 'fiat'} | Status: {status or 'N/A'}",
+                        transaction_id=order_id,
                         wallet_type="Fiat",
                         source_sheet=sheet_name,
+                        user_id=user_id,
                     )
                     self.identifiers.fiat_trade_transactions.append(txn_crypto)
 

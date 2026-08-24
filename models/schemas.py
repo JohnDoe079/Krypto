@@ -48,6 +48,7 @@ class AssetTransaction:
     transaction_id: str = ""
     wallet_type: str = ""          # Spot / Funding / Deposit / Withdrawal / OTC / P2P / Pay / Fiat
     source_sheet: str = ""         # Nazwa oryginalnego arkusza, np. "Spot Asset Log"
+    user_id: str = ""              # User ID z wiersza (jeśli inny niż właściciel — do analizy)
 
     def to_dict(self) -> dict:
         return {
@@ -62,6 +63,7 @@ class AssetTransaction:
             "transaction_id": self.transaction_id,
             "wallet_type": self.wallet_type,
             "source_sheet": self.source_sheet,
+            "user_id": self.user_id,
         }
 
 

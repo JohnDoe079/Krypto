@@ -394,6 +394,12 @@ class ReportGenerator:
             txns = txns_by_currency.get(curr, [])
             bal = balance_map.get(curr)
 
+            # Sprawdź czy w tej walucie są transakcje fiat z obcym User ID
+            foreign_in_curr = set()
+            for t in txns:
+                if t.wallet_type == "Fiat" and t.user_id and t.user_id not in r.user_ids:
+                    foreign_in_curr.add(t.user_id)
+
             # Podsumowanie per waluta (BEZ fiat)
             txns_bal = [t for t in txns if t.wallet_type != "Fiat"]
             total_in = sum(_to_float(t.change) for t in txns_bal if _to_float(t.change) > 0)
@@ -406,6 +412,12 @@ class ReportGenerator:
                 time_range_str = f" (zakres: {min(times)[:19]} → {max(times)[:19]})"
 
             self._add_paragraph(f"Waluta {curr}:{time_range_str}", bold=True)
+
+            if foreign_in_curr:
+                self._add_paragraph(
+                    f" ⚠️ UWAGA: Transakcje fiat w tej walucie pochodzą od innego User ID: {', '.join(sorted(foreign_in_curr))}. "
+                    f"Może to oznaczać zasilenie konta z zewnętrznego źródła (inny użytkownik / konto powiązane).",
+                    color=RGBColor(0xC0, 0x00, 0x00))
 
             if txns_bal:
                 summary_row = [[
