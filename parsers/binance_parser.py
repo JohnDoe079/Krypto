@@ -210,11 +210,14 @@ class BinanceReportParser:
                                 btc_str = ""
                                 usd_str = ""
                                 for token in tokens:
-                                    if re.match(r'^[\d\.,]+$', token):
+                                    # Wyciągnij pierwszą liczbę z tokena (ignoruj znaki walutowe: $ € £ ¥ ≈)
+                                    m = re.search(r'[\d\.,]+', token)
+                                    if m:
+                                        num = m.group()
                                         if not btc_str:
-                                            btc_str = _fmt_num(token)
+                                            btc_str = _fmt_num(num)
                                         elif not usd_str:
-                                            usd_str = _fmt_num(token)
+                                            usd_str = _fmt_num(num)
                                             break
                                 if not btc_str:
                                     btc_str = _fmt_num(btc_val)
