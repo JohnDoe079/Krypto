@@ -395,9 +395,10 @@ class ReportGenerator:
             bal = balance_map.get(curr)
 
             # Sprawdź czy w tej walucie są transakcje fiat z obcym User ID
+            known_ids = r.user_ids | r.related_user_ids
             foreign_in_curr = set()
             for t in txns:
-                if t.wallet_type == "Fiat" and t.user_id and t.user_id not in r.user_ids:
+                if t.wallet_type == "Fiat" and t.user_id and t.user_id not in known_ids:
                     foreign_in_curr.add(t.user_id)
 
             # Podsumowanie per waluta (BEZ fiat)

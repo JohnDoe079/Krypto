@@ -94,15 +94,17 @@ class BinanceReportParser:
         # Sprawdź czy w transakcjach fiat są inne User ID (może być zasilenie z innego konta)
         all_fiat = self.identifiers.fiat_deposit_transactions + self.identifiers.fiat_trade_transactions
         foreign_user_ids = set()
+        # Wszystkie znane ID (właściciel + powiązane + z innych arkuszy)
+        known_ids = self.identifiers.user_ids | self.identifiers.related_user_ids
         for t in all_fiat:
-            if t.user_id and t.user_id not in self.identifiers.user_ids and t.user_id not in self.identifiers.related_user_ids:
+            if t.user_id and t.user_id not in known_ids:
                 foreign_user_ids.add(t.user_id)
         if foreign_user_ids:
-            print(f"  ⚠️  W transakcjach fiat wykryto User ID inne niż właściciel konta: {', '.join(sorted(foreign_user_ids))}")
+            print(f"  ⚠️  W transakcjach fiat wykryto User ID inne niż znane: {', '.join(sorted(foreign_user_ids))}")
             for uid in foreign_user_ids:
                 self.identifiers.related_user_ids.add(uid)
         elif all_fiat:
-            print(f"  ✓ Wszystkie transakcje fiat pochodzą od właściciela konta.")
+            print(f"  ✓ Wszystkie transakcje fiat pochodzą od znanych użytkowników.")
 
         return self.identifiers
 
@@ -374,6 +376,20 @@ class BinanceReportParser:
 
         self.identifiers.customer_info_sections = sections
 
+        # === Wykryj User ID właściciela explicite z Basic Information ===
+        for section_name, data in sections.items():
+            if "basic" in section_name.lower() or "customer" in section_name.lower():
+                for col, val in data.items():
+                    if val is None or val == "":
+                        continue
+                    col_lower = str(col).lower().strip()
+                    # Szukaj explicite kolumny User ID
+                    if col_lower in ["user id", "userid", "user_id", "uid", "binance id", "binanceid"]:
+                        v_norm = self._normalize_user_id(val)
+                        if v_norm:
+                            self.identifiers.user_ids.add(v_norm)
+                            print(f"  Wykryto ID właściciela (z Customer Info): {v_norm}")
+
         for section_name, data in sections.items():
             for col, val in data.items():
                 if val is None or val == "":
@@ -394,9 +410,12 @@ class BinanceReportParser:
                     self.identifiers.ips.add(v)
                     continue
 
-                if re.match(r"^\d{9,10}$", v):
-                    self.identifiers.user_ids.add(v)
-                    continue
+                # Fallback: wykryj User ID z dowolnej sekcji (ale tylko jeśli nie ma jeszcze)
+                if not self.identifiers.user_ids:
+                    v_norm = self._normalize_user_id(v)
+                    if v_norm:
+                        self.identifiers.user_ids.add(v_norm)
+                        continue
 
                 if re.match(r"^[A-Z]{1,2}\d{6,10}$", v):
                     self.identifiers.id_numbers.add(v)
@@ -405,6 +424,20 @@ class BinanceReportParser:
                 if col and "nationality" in str(col).lower() and len(v) == 2 and v.isalpha():
                     self.identifiers.nationalities.add(v)
                     continue
+
+    def _normalize_user_id(self, val) -> Optional[str]:
+        """Normalizuje User ID — usuwa .0 z float, spacje, cudzysłowy."""
+        if val is None or val == "":
+            return None
+        v = str(val).strip().lstrip("'").rstrip("'")
+        # Usuń .0 z float (np. 394533241.0 → 394533241)
+        if v.endswith(".0"):
+            v = v[:-2]
+        v = v.replace(" ", "").replace(",", "")
+        # User ID Binance: 6-12 cyfr
+        if re.match(r"^\d{6,12}$", v):
+            return v
+        return None
 
     def _parse_kyc_documents(self, df: pd.DataFrame):
         texts = []
