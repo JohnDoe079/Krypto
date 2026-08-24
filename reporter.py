@@ -112,6 +112,53 @@ def _fmt_signed(v: float) -> str:
     return f"+{s}" if v > 0 else f"-{s}"
 
 
+def _is_fiat_duplicate(t: AssetTransaction, all_txns: List[AssetTransaction]) -> bool:
+    """Sprawdza czy transakcja fiat jest duplikatem w innych logach (Spot/Funding/Deposit/Withdrawal).
+
+    Kryteria duplikatu:
+    - Ta sama waluta
+    - Ta sama kwota (±0.1%)
+    - Czas w zakresie ±5 minut
+    - Źródło NIE jest Fiat (czyli Spot/Funding/Deposit/Withdrawal)
+    """
+    if t.wallet_type != "Fiat":
+        return False
+
+    t_curr = t.currency.upper() if t.currency else ""
+    t_chg = _to_float(t.change)
+    t_time = t.time[:19] if t.time else ""
+    if not t_curr or abs(t_chg) < 1e-12 or not t_time:
+        return False
+
+    tolerance = max(1e-8, abs(t_chg) * 0.001)  # 0.1% lub minimum 1e-8
+
+    for other in all_txns:
+        if other.wallet_type == "Fiat" or other is t:
+            continue
+        o_curr = other.currency.upper() if other.currency else ""
+        if o_curr != t_curr:
+            continue
+        o_chg = _to_float(other.change)
+        if abs(o_chg - t_chg) > tolerance:
+            continue
+        # Sprawdź czas ±5 minut
+        o_time = other.time[:19] if other.time else ""
+        if not o_time:
+            continue
+        try:
+            from datetime import datetime, timedelta
+            t_dt = datetime.strptime(t_time, "%Y-%m-%d %H:%M:%S")
+            o_dt = datetime.strptime(o_time, "%Y-%m-%d %H:%M:%S")
+            if abs((t_dt - o_dt).total_seconds()) <= 300:  # 5 minut
+                return True
+        except ValueError:
+            # Jeśli nie da się sparsować, porównaj stringi (dokładność do sekundy)
+            if t_time == o_time:
+                return True
+
+    return False
+
+
 class ReportGenerator:
     def __init__(self, output_path: str = "Raport_Analiza.docx"):
         self.output_path = output_path
@@ -313,8 +360,9 @@ class ReportGenerator:
         self._add_paragraph(
             "Poniższa analiza łączy dane ze wszystkich arkuszy transakcyjnych: Spot Asset Log, Funding Asset Log, "
             "Deposit History, Withdrawal History, Fiat Deposit oraz Fiat Trades. Dla każdej waluty pokazano pełen bilans ruchów. "
-            "Transakcje oznaczone [FIAT] w kolumnie Powód pochodzą z arkuszy fiat i są pokazane wyłącznie informacyjnie — "
-            "nie wpływają na bilans, ponieważ ten sam ruch jest już uwzględniony w logach Spot/Funding.",
+            "Transakcje oznaczone [FIAT] w kolumnie Powód pochodzą z arkuszy fiat. "
+            "Wartości w nawiasie (*) to duplikaty — ten sam ruch jest już uwzględniony w logach Spot/Funding i NIE wpływa na bilans. "
+            "Wartości bez nawiasu to unikalne transakcje fiat (brak duplikatu w innych logach) i SĄ wliczane do bilansu.",
             color=RGBColor(0x60, 0x60, 0x60))
 
         # Zbierz wszystkie waluty: z transakcji + z Assets Overview
@@ -324,8 +372,8 @@ class ReportGenerator:
         confirmed_all = [t for t in all_txns if not _is_pending_transaction(t)]
         pending_all = [t for t in all_txns if _is_pending_transaction(t)]
 
-        # === BILANS: tylko transakcje NIE-fiat (żeby nie dublować logów spot) ===
-        confirmed_for_balance = [t for t in confirmed_all if t.wallet_type != "Fiat"]
+        # === BILANS: wszystkie transakcje, ale fiat-duplikaty pomijamy ===
+        confirmed_for_balance = [t for t in confirmed_all if not _is_fiat_duplicate(t, confirmed_all)]
 
         # Grupowanie transakcji per waluta (do wyświetlenia — wszystkie, w tym fiat)
         txns_by_currency: Dict[str, List[AssetTransaction]] = {}
@@ -402,8 +450,8 @@ class ReportGenerator:
                 if t.wallet_type == "Fiat" and t.user_id and t.user_id not in r.user_ids:
                     foreign_in_curr.add(t.user_id)
 
-            # Podsumowanie per waluta (BEZ fiat)
-            txns_bal = [t for t in txns if t.wallet_type != "Fiat"]
+            # Podsumowanie per waluta (bez duplikatów fiat)
+            txns_bal = [t for t in txns if not _is_fiat_duplicate(t, confirmed_all)]
             total_in = sum(_to_float(t.change) for t in txns_bal if _to_float(t.change) > 0)
             total_out = sum(abs(_to_float(t.change)) for t in txns_bal if _to_float(t.change) < 0)
             netto = total_in - total_out
@@ -456,18 +504,21 @@ class ReportGenerator:
                         f"Nie oznacza to debetu — brakuje tu depozytów/wypłat z innych źródeł.",
                         color=RGBColor(0xC0, 0x00, 0x00))
 
-                # Tabela transakcji — WSZYSTKIE (w tym fiat, oznaczone jako info)
+                # Tabela transakcji — WSZYSTKIE (w tym fiat, oznaczone jako duplikat lub unikalne)
                 txn_rows = []
                 for t in sorted(txns, key=lambda x: x.time or ""):
                     chg = _to_float(t.change)
-                    # Pokaż wszystko — fiat też, ale z adnotacją
                     if abs(chg) < 1e-12 and t.wallet_type != "Fiat":
                         continue
 
+                    is_dup = _is_fiat_duplicate(t, confirmed_all)
                     chg_str = _fmt_signed(chg)
-                    # Dla fiat: pokaż kwotę w nawiasie, żeby było widać, ale nie liczyć do bilansu
-                    if t.wallet_type == "Fiat":
+                    # Dla fiat-duplikatów: nawias + gwiazdka
+                    if t.wallet_type == "Fiat" and is_dup:
                         chg_str = f"({_fmt_signed(chg)})*"
+                    # Dla fiat-unikalnych: bez nawiasu (liczy się do bilansu)
+                    elif t.wallet_type == "Fiat" and not is_dup:
+                        chg_str = f"{_fmt_signed(chg)} [FIAT]"
 
                     reason_display = t.reason if t.reason else "—"
                     source_display = t.source_sheet if t.source_sheet else t.wallet_type
@@ -485,12 +536,17 @@ class ReportGenerator:
                         txn_rows,
                         col_widths=[Inches(1.0), Inches(0.8), Inches(2.8), Inches(1.1), Inches(1.3)])
 
-                    # Dodaj legendę, jeśli były transakcje fiat
-                    has_fiat = any(t.wallet_type == "Fiat" for t in txns)
-                    if has_fiat:
+                    # Dodaj legendę, jeśli były duplikaty fiat
+                    has_fiat_dup = any(t.wallet_type == "Fiat" and _is_fiat_duplicate(t, confirmed_all) for t in txns)
+                    has_fiat_unique = any(t.wallet_type == "Fiat" and not _is_fiat_duplicate(t, confirmed_all) for t in txns)
+                    if has_fiat_dup:
                         self._add_paragraph(
-                            "* Wartość w nawiasie pochodzi z arkusza Fiat — pokazana informacyjnie, nie wliczana do bilansu (duplikat w logach Spot/Funding).",
+                            "* Wartość w nawiasie to duplikat fiat — pokazana informacyjnie, nie wliczana do bilansu (ten sam ruch jest w logach Spot/Funding).",
                             color=RGBColor(0x80, 0x80, 0x80))
+                    if has_fiat_unique:
+                        self._add_paragraph(
+                            "[FIAT] Transakcja unikalna (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
+                            color=RGBColor(0x00, 0x60, 0x80))
             else:
                 # Waluta w Assets Overview ale bez transakcji (lub tylko fiat)
                 bal_str = bal.all_positions if bal else "(brak)"
