@@ -520,7 +520,7 @@ class ReportGenerator:
                         chg_str = f"({_fmt_signed(chg)})*"
                     # Dla fiat-unikalnych: bez nawiasu (liczy się do bilansu)
                     elif t.wallet_type == "Fiat" and not is_dup:
-                        chg_str = f"{_fmt_signed(chg)} [FIAT]"
+                        chg_str = _fmt_signed(chg)
 
                     reason_display = t.reason if t.reason else "—"
                     source_display = t.source_sheet if t.source_sheet else t.wallet_type
@@ -547,7 +547,7 @@ class ReportGenerator:
                             color=RGBColor(0x80, 0x80, 0x80))
                     if has_fiat_unique:
                         self._add_paragraph(
-                            "[FIAT] Transakcja unikalna (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
+                            "Transakcja unikalna z arkusza Fiat (brak duplikatu w innych logach) — WYLICZANA do bilansu.",
                             color=RGBColor(0x00, 0x60, 0x80))
             else:
                 # Waluta w Assets Overview ale bez transakcji (lub tylko fiat)
