@@ -1,6 +1,7 @@
 """Modele danych i funkcje pomocnicze do ekstrakcji identyfikatorów."""
 
 import re
+import warnings
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
@@ -302,13 +303,25 @@ def extract_time_range(df: pd.DataFrame) -> Optional[Dict[str, str]]:
 
     all_dates = []
     for col in time_cols:
-        try:
-            parsed = pd.to_datetime(df[col], errors="coerce")
-            valid = parsed.dropna()
-            if len(valid) > 0:
-                all_dates.extend(valid.tolist())
-        except Exception:
-            continue
+        parsed = None
+        # Próbuj najpierw najczęstsze formaty z raportów Binance
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%d/%m/%Y %H:%M:%S"]:
+            try:
+                parsed = pd.to_datetime(df[col], format=fmt, errors="coerce")
+                if parsed.notna().any():
+                    break
+            except (ValueError, TypeError):
+                continue
+
+        # Fallback z wyciszeniem warningu
+        if parsed is None or parsed.isna().all():
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                parsed = pd.to_datetime(df[col], errors="coerce")
+
+        valid = parsed.dropna()
+        if len(valid) > 0:
+            all_dates.extend(valid.tolist())
 
     if not all_dates:
         return None

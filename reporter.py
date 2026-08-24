@@ -162,7 +162,7 @@ class ReportGenerator:
             run.font.color.rgb = color
         return p
 
-    def _add_table(self, headers: List[str], rows: List[List[str]], max_rows: int = None):
+    def _add_table(self, headers: List[str], rows: List[List[str]], max_rows: int = None, col_widths: List[Inches] = None):
         if not rows:
             self._add_paragraph("(brak danych)")
             return None
@@ -174,9 +174,11 @@ class ReportGenerator:
         table.autofit = False
         table.allow_autofit = False
 
-        col_width = Inches(PAGE_WIDTH_INCHES / n_cols)
         for i in range(n_cols):
-            table.columns[i].width = col_width
+            if col_widths and i < len(col_widths):
+                table.columns[i].width = col_widths[i]
+            else:
+                table.columns[i].width = Inches(PAGE_WIDTH_INCHES / n_cols)
 
         hdr_cells = table.rows[0].cells
         for i, h in enumerate(headers):
@@ -195,7 +197,7 @@ class ReportGenerator:
             row_cells = table.add_row().cells
             for i, cell_text in enumerate(row_data):
                 txt = str(cell_text) if cell_text is not None else ""
-                row_cells[i].text = txt[:250]
+                row_cells[i].text = txt[:2000]
                 for paragraph in row_cells[i].paragraphs:
                     for run in paragraph.runs:
                         run.font.size = Pt(9)
@@ -386,8 +388,6 @@ class ReportGenerator:
                     chg = _to_float(t.change)
                     chg_str = _fmt_signed(chg)
                     reason_display = t.reason if t.reason else "—"
-                    if len(reason_display) > 60:
-                        reason_display = reason_display[:57] + "..."
                     txn_rows.append([
                         t.time[:19] if t.time else "",
                         chg_str,
@@ -396,7 +396,8 @@ class ReportGenerator:
                     ])
                 self._add_table(
                     ["Czas", "Zmiana", "Powód", "TxID"],
-                    txn_rows)
+                    txn_rows,
+                    col_widths=[Inches(1.1), Inches(0.9), Inches(3.2), Inches(1.8)])
             self._add_paragraph("")
 
     def _render_combined_flow(self, r: ExtractedIdentifiers):
