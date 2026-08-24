@@ -299,7 +299,8 @@ class ReportGenerator:
     def _render_currency_flows(self, r: ExtractedIdentifiers):
         """Jedna sekcja per waluta — wszystkie transakcje ze wszystkich arkuszy w jednym miejscu."""
         all_txns = (r.spot_transactions + r.funding_transactions +
-                    r.deposit_transactions + r.withdrawal_transactions)
+                    r.deposit_transactions + r.withdrawal_transactions +
+                    r.fiat_deposit_transactions + r.fiat_trade_transactions)
         if not all_txns and not r.asset_balances:
             return
 

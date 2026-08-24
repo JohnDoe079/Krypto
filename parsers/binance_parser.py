@@ -614,6 +614,7 @@ class BinanceReportParser:
                     self.identifiers.related_user_ids.add(str(v))
 
     def _parse_fiat_deposit(self, df: pd.DataFrame, sheet_name: str):
+        # --- Ekstrakcja identyfikatorów ---
         for col, target in [
             ("Card Bin", self.identifiers.card_bins),
             ("Card Last 4 Digital", self.identifiers.card_last4),
@@ -636,7 +637,53 @@ class BinanceReportParser:
                 if v:
                     self.identifiers.related_user_ids.add(str(v))
 
+        # --- Parsowanie transakcji (ruchy środków) ---
+        # Użytkownik płaci fiat (Currency, Gross Amount) i dostaje krypto (Crypto Currency, Crypto Obtain Amount)
+        for _, row in df.iterrows():
+            status = str(clean_val(row.get("Status Name"))).lower() if "Status Name" in df.columns else ""
+            # Pomiń niepotwierdzone / błędne transakcje
+            if status and status not in ["completed", "success", "filled", "confirmed", ""]:
+                if any(x in status for x in ["fail", "error", "cancel", "reject", "expired"]):
+                    continue
+
+            time_str = str(clean_val(row.get("Order Create Time"))) if "Order Create Time" in df.columns else ""
+            fiat_curr = str(clean_val(row.get("Currency"))) if "Currency" in df.columns else ""
+            fiat_amt = clean_val(row.get("Gross Amount")) if "Gross Amount" in df.columns else None
+            crypto_curr = str(clean_val(row.get("Crypto Currency"))) if "Crypto Currency" in df.columns else ""
+            crypto_amt = clean_val(row.get("Crypto Obtain Amount")) if "Crypto Obtain Amount" in df.columns else None
+            if not crypto_amt:
+                crypto_amt = clean_val(row.get("Crypto Amount")) if "Crypto Amount" in df.columns else None
+
+            # Rozchód fiat (użytkownik płaci)
+            if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
+                txn_fiat = AssetTransaction(
+                    time=time_str,
+                    currency=fiat_curr,
+                    amount=_fmt_num(fiat_amt),
+                    change=_fmt_num(f"-{fiat_amt}"),
+                    reason=f"Fiat Deposit (zakup krypto za fiat) | Status: {status or 'N/A'}",
+                    wallet_type="Fiat",
+                    source_sheet=sheet_name,
+                )
+                self.identifiers.fiat_deposit_transactions.append(txn_fiat)
+
+            # Przychód krypto (otrzymane)
+            if crypto_curr and crypto_amt and not _is_zero(crypto_amt):
+                txn_crypto = AssetTransaction(
+                    time=time_str,
+                    currency=crypto_curr,
+                    amount=_fmt_num(crypto_amt),
+                    change=_fmt_num(crypto_amt),  # przychód – dodatni
+                    reason=f"Fiat Deposit (otrzymano krypto) | Status: {status or 'N/A'}",
+                    wallet_type="Fiat",
+                    source_sheet=sheet_name,
+                )
+                self.identifiers.fiat_deposit_transactions.append(txn_crypto)
+
+        print(f"  Sparsowano {len(self.identifiers.fiat_deposit_transactions)} transakcji Fiat Deposit")
+
     def _parse_fiat_trades(self, df: pd.DataFrame, sheet_name: str):
+        # --- Ekstrakcja identyfikatorów ---
         if "User Email" in df.columns:
             for v in df["User Email"].dropna():
                 email = extract_email(v)
@@ -652,6 +699,78 @@ class BinanceReportParser:
                 v = clean_val(v)
                 if v:
                     self.identifiers.related_user_ids.add(str(v))
+
+        # --- Parsowanie transakcji (ruchy środków) ---
+        for _, row in df.iterrows():
+            status = str(clean_val(row.get("Status Name"))).lower() if "Status Name" in df.columns else ""
+            if status and status not in ["completed", "success", "filled", "confirmed", ""]:
+                if any(x in status for x in ["fail", "error", "cancel", "reject", "expired"]):
+                    continue
+
+            time_str = str(clean_val(row.get("Order Create Time"))) if "Order Create Time" in df.columns else ""
+            business_type = str(clean_val(row.get("Business Type"))).upper() if "Business Type" in df.columns else ""
+            fiat_curr = str(clean_val(row.get("Currency"))) if "Currency" in df.columns else ""
+            fiat_amt = clean_val(row.get("Gross Amount")) if "Gross Amount" in df.columns else None
+            crypto_curr = str(clean_val(row.get("Crypto Currency"))) if "Crypto Currency" in df.columns else ""
+            crypto_amt = clean_val(row.get("Crypto Obtain Amount")) if "Crypto Obtain Amount" in df.columns else None
+            if not crypto_amt:
+                crypto_amt = clean_val(row.get("Crypto Amount")) if "Crypto Amount" in df.columns else None
+
+            # Domyślnie traktuj jako BUY jeśli nieznany Business Type
+            is_buy = business_type in ["BUY", ""] or "BUY" in business_type
+            is_sell = business_type == "SELL" or "SELL" in business_type
+
+            if is_buy:
+                # Rozchód fiat, przychód krypto
+                if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
+                    txn_fiat = AssetTransaction(
+                        time=time_str,
+                        currency=fiat_curr,
+                        amount=_fmt_num(fiat_amt),
+                        change=_fmt_num(f"-{fiat_amt}"),
+                        reason=f"Fiat Trade BUY | Status: {status or 'N/A'}",
+                        wallet_type="Fiat",
+                        source_sheet=sheet_name,
+                    )
+                    self.identifiers.fiat_trade_transactions.append(txn_fiat)
+                if crypto_curr and crypto_amt and not _is_zero(crypto_amt):
+                    txn_crypto = AssetTransaction(
+                        time=time_str,
+                        currency=crypto_curr,
+                        amount=_fmt_num(crypto_amt),
+                        change=_fmt_num(crypto_amt),
+                        reason=f"Fiat Trade BUY (otrzymano krypto) | Status: {status or 'N/A'}",
+                        wallet_type="Fiat",
+                        source_sheet=sheet_name,
+                    )
+                    self.identifiers.fiat_trade_transactions.append(txn_crypto)
+
+            elif is_sell:
+                # Przychód fiat, rozchód krypto
+                if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
+                    txn_fiat = AssetTransaction(
+                        time=time_str,
+                        currency=fiat_curr,
+                        amount=_fmt_num(fiat_amt),
+                        change=_fmt_num(fiat_amt),
+                        reason=f"Fiat Trade SELL | Status: {status or 'N/A'}",
+                        wallet_type="Fiat",
+                        source_sheet=sheet_name,
+                    )
+                    self.identifiers.fiat_trade_transactions.append(txn_fiat)
+                if crypto_curr and crypto_amt and not _is_zero(crypto_amt):
+                    txn_crypto = AssetTransaction(
+                        time=time_str,
+                        currency=crypto_curr,
+                        amount=_fmt_num(crypto_amt),
+                        change=_fmt_num(f"-{crypto_amt}"),
+                        reason=f"Fiat Trade SELL (sprzedano krypto) | Status: {status or 'N/A'}",
+                        wallet_type="Fiat",
+                        source_sheet=sheet_name,
+                    )
+                    self.identifiers.fiat_trade_transactions.append(txn_crypto)
+
+        print(f"  Sparsowano {len(self.identifiers.fiat_trade_transactions)} transakcji Fiat Trades")
 
     def _parse_binance_pay(self, df: pd.DataFrame, sheet_name: str):
         if "Counterparty Wallet ID" in df.columns:

@@ -36,7 +36,7 @@ class AssetBalance:
 
 @dataclass
 class AssetTransaction:
-    """Pojedyncza transakcja z dowolnego arkusza (Spot/Funding/Deposit/Withdrawal/OTC/P2P/itp)."""
+    """Pojedyncza transakcja z dowolnego arkusza (Spot/Funding/Deposit/Withdrawal/OTC/P2P/Fiat/itp)."""
     time: str = ""
     currency: str = ""
     amount: str = ""
@@ -101,6 +101,8 @@ class ExtractedIdentifiers:
     funding_transactions: List[AssetTransaction] = field(default_factory=list)
     deposit_transactions: List[AssetTransaction] = field(default_factory=list)
     withdrawal_transactions: List[AssetTransaction] = field(default_factory=list)
+    fiat_deposit_transactions: List[AssetTransaction] = field(default_factory=list)
+    fiat_trade_transactions: List[AssetTransaction] = field(default_factory=list)
 
     time_ranges: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
@@ -142,6 +144,8 @@ class ExtractedIdentifiers:
             "funding_transactions": [t.to_dict() for t in self.funding_transactions],
             "deposit_transactions": [t.to_dict() for t in self.deposit_transactions],
             "withdrawal_transactions": [t.to_dict() for t in self.withdrawal_transactions],
+            "fiat_deposit_transactions": [t.to_dict() for t in self.fiat_deposit_transactions],
+            "fiat_trade_transactions": [t.to_dict() for t in self.fiat_trade_transactions],
             "time_ranges": self.time_ranges,
             "parsed_sheets": self.parsed_sheets,
             "unknown_sheets": self.unknown_sheets,
@@ -180,6 +184,8 @@ class ExtractedIdentifiers:
             f"  Transakcje Funding: {len(self.funding_transactions)}",
             f"  Transakcje Deposit: {len(self.deposit_transactions)}",
             f"  Transakcje Withdrawal: {len(self.withdrawal_transactions)}",
+            f"  Transakcje Fiat Deposit: {len(self.fiat_deposit_transactions)}",
+            f"  Transakcje Fiat Trades: {len(self.fiat_trade_transactions)}",
             f"  Zakresy czasowe: {len(self.time_ranges)}",
         ]
         return "\n".join(lines)
