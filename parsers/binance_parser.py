@@ -311,6 +311,14 @@ class BinanceReportParser:
 
     def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
         self._parse_asset_log(df, "Funding", sheet_name)
+    def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
+        """Proxy do _parse_asset_log dla Spot."""
+        self._parse_asset_log(df, "Spot", sheet_name)
+
+    def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
+        """Proxy do _parse_asset_log dla Funding."""
+        self._parse_asset_log(df, "Funding", sheet_name)
+
     def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str, sheet_name: str):
         """Parsuje Spot Asset Log lub Funding Asset Log z grupowaniem po Transaction ID.
 
