@@ -303,12 +303,11 @@ class ReportGenerator:
         self._render_currency_flows(r)
 
     def _render_htx_user_card(self, r: ExtractedIdentifiers, uid: str, user_data: Dict[str, str]):
-        """Renderuje kartę pojedynczego użytkownika HTX z danymi + zdjęciami."""
+        """Renderuje kartę pojedynczego użytkownika HTX z danymi + portfele + zdjęcia."""
         # Nagłówek karty
         self._add_heading(f"Użytkownik HTX — UID: {uid}", level=4)
 
-        # --- DANE PODSTAWOWE (uporządkowane) ---
-        # Mapowanie nazw pól na ładne etykiety
+        # --- DANE PODSTAWOWE + PORTFELE W JEDNEJ TABELI ---
         field_labels = {
             "uid": "UID użytkownika",
             "name": "Imię i nazwisko",
@@ -334,27 +333,29 @@ class ReportGenerator:
                 val = user_data[field_key]
                 profile_rows.append([label, str(val) if val else "(puste)"])
 
-        # Pozostałe pola
+        # Pozostałe pola (bez user_address — portfele dodamy osobno)
         for field_key, val in user_data.items():
-            if field_key in priority_fields:
+            if field_key in priority_fields or field_key == "user_address":
                 continue
             label = field_labels.get(field_key, field_key)
             profile_rows.append([label, str(val) if val else "(puste)"])
+
+        # --- PORTFELE W TEJ SAMEJ TABELI ---
+        wallets = r.wallet_addresses_by_user.get(uid, [])
+        if wallets:
+            if len(wallets) == 1:
+                profile_rows.append(["Adres portfela", sorted(wallets)[0]])
+            else:
+                for i, addr in enumerate(sorted(wallets), 1):
+                    profile_rows.append([f"Adres portfela {i}", addr])
+        else:
+            profile_rows.append(["Adresy portfeli", "(brak)"])
 
         if profile_rows:
             self._add_table(["Pole", "Wartość"], profile_rows, max_rows=50)
 
         # --- ZDJĘCIA CERTYFIKOWANE ---
         self._render_htx_photos(r, uid)
-
-        # --- PORTFELE TEGO UŻYTKOWNIKA ---
-        wallets = r.wallet_addresses_by_user.get(uid, [])
-        if wallets:
-            self._add_paragraph("Przypisane adresy portfeli:", bold=True)
-            wallet_rows = [[str(i+1), addr] for i, addr in enumerate(sorted(wallets))]
-            self._add_table(["Lp.", "Adres portfela"], wallet_rows, max_rows=20)
-        else:
-            self._add_paragraph("Brak przypisanych adresów portfeli.", color=RGBColor(0x80, 0x80, 0x80))
 
         self._add_paragraph("")  # odstęp między użytkownikami
 

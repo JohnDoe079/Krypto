@@ -23,40 +23,6 @@ class HTXReportParser:
             source_file=self.file_path.name,
             exchange="htx"
         )
-        # Wykryj katalog certified_photos obok pliku XLSX
-        self._load_certified_photos()
-
-    def _load_certified_photos(self):
-        """Skanuje katalog certified_photos/ obok pliku .xlsx i przypisuje zdjęcia per UID."""
-        certified_dir = self.file_path.parent / "certified_photos"
-        if not certified_dir.exists() or not certified_dir.is_dir():
-            print(f"  [!] Nie znaleziono katalogu certified_photos w: {certified_dir}")
-            return
-
-        for uid_dir in certified_dir.iterdir():
-            if not uid_dir.is_dir():
-                continue
-            uid = uid_dir.name.strip()
-            # Akceptuj tylko katalogi o nazwie numerycznej (UID)
-            if not uid.isdigit():
-                continue
-
-            photos = []
-            for ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"):
-                photos.extend(sorted(uid_dir.glob(f"*{ext}")))
-                photos.extend(sorted(uid_dir.glob(f"*{ext.upper()}")))
-
-            # Usuń duplikaty zachowując kolejność
-            seen = set()
-            unique_photos = []
-            for p in photos:
-                if p.name not in seen:
-                    seen.add(p.name)
-                    unique_photos.append(str(p))
-
-            if unique_photos:
-                self.identifiers.certified_photos[uid] = unique_photos
-                print(f"  [ZDJĘCIA] UID {uid}: znaleziono {len(unique_photos)} zdjęć w {uid_dir}")
 
     def parse_all(self) -> ExtractedIdentifiers:
         all_sheets = self.xl.sheet_names
@@ -87,6 +53,52 @@ class HTXReportParser:
             self._parse_generic(df, sheet_name)
             self.identifiers.unknown_sheets.append(sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
+
+    def _match_certified_photos(self):
+        """Dopasowuje foldery ze zdjęciami do UID. Folder może być prefiksem UID (krótszy o 1+ znaków)."""
+        certified_dir = self.file_path.parent / "certified_photos"
+        if not certified_dir.exists() or not certified_dir.is_dir():
+            print(f"  [!] Nie znaleziono katalogu certified_photos w: {certified_dir}")
+            return
+
+        # Zbierz wszystkie foldery numeryczne
+        folders = [d for d in certified_dir.iterdir() if d.is_dir() and d.name.isdigit()]
+        if not folders:
+            print(f"  [!] Katalog certified_photos istnieje, ale nie zawiera folderów numerycznych")
+            return
+
+        for uid in sorted(self.identifiers.user_ids):
+            matched_folder = None
+            # Szukaj folderu który jest prefiksem UID (najdłuższy pasujący)
+            best_match = None
+            best_len = 0
+            for fdir in folders:
+                fname = fdir.name
+                if uid.startswith(fname) or fname.startswith(uid):
+                    if len(fname) > best_len:
+                        best_match = fdir
+                        best_len = len(fname)
+
+            if best_match:
+                photos = []
+                for ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"):
+                    photos.extend(sorted(best_match.glob(f"*{ext}")))
+                    photos.extend(sorted(best_match.glob(f"*{ext.upper()}")))
+                # Usuń duplikaty zachowując kolejność
+                seen = set()
+                unique_photos = []
+                for p in photos:
+                    if p.name not in seen:
+                        seen.add(p.name)
+                        unique_photos.append(str(p))
+
+                if unique_photos:
+                    self.identifiers.certified_photos[uid] = unique_photos
+                    print(f"  [ZDJĘCIA] UID {uid} <- folder {best_match.name}: {len(unique_photos)} zdjęć")
+                else:
+                    print(f"  [ZDJĘCIA] UID {uid} <- folder {best_match.name}: brak plików graficznych")
+            else:
+                print(f"  [ZDJĘCIA] UID {uid}: nie znaleziono pasującego folderu w certified_photos")
 
     def _parse_register_1(self, df: pd.DataFrame, sheet_name: str):
         """Parsuje arkusz register_1 — dane rejestracyjne / KYC HTX."""
@@ -133,7 +145,6 @@ class HTXReportParser:
                 self.identifiers.user_ids.add(uid_str)
                 if uid_str not in self.identifiers.wallet_addresses_by_user:
                     self.identifiers.wallet_addresses_by_user[uid_str] = []
-                # Upewnij się, że certified_photos ma wpis dla tego UID
                 if uid_str not in self.identifiers.certified_photos:
                     self.identifiers.certified_photos[uid_str] = []
 
@@ -213,6 +224,9 @@ class HTXReportParser:
         if self.identifiers.wallet_addresses_by_user:
             for uid_val, addrs in self.identifiers.wallet_addresses_by_user.items():
                 print(f"  Adresy portfeli dla UID {uid_val}: {', '.join(addrs)}")
+
+        # --- DOPASOWANIE ZDJĘĆ CERTYFIKOWANYCH (po zebraniu wszystkich UID) ---
+        self._match_certified_photos()
 
     def _parse_generic(self, df: pd.DataFrame, sheet_name: str):
         """Generyczne parsowanie nieznanych arkuszy HTX — szuka portfeli, emaili, IP, TXID."""
