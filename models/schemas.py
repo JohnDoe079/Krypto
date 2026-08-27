@@ -98,6 +98,9 @@ class ExtractedIdentifiers:
     geolocations: Set[str] = field(default_factory=set)
     browsers: Set[str] = field(default_factory=set)
 
+    # HTX: certified photos per UID {uid: [paths]}
+    certified_photos: Dict[str, List[str]] = field(default_factory=dict)
+
     estimate_total_btc: str = ""
     estimate_total_usdt: str = ""
     asset_balances: List[AssetBalance] = field(default_factory=list)
@@ -146,6 +149,10 @@ class ExtractedIdentifiers:
             "id_numbers": sorted(self.id_numbers),
             "geolocations": sorted(self.geolocations),
             "browsers": sorted(self.browsers),
+            "certified_photos": {
+                uid: sorted(paths)
+                for uid, paths in self.certified_photos.items()
+            },
             "estimate_total_btc": self.estimate_total_btc,
             "estimate_total_usdt": self.estimate_total_usdt,
             "asset_balances": [b.to_dict() for b in self.asset_balances],
@@ -189,6 +196,7 @@ class ExtractedIdentifiers:
             f"  Numery dokumentów: {len(self.id_numbers)}",
             f"  Lokalizacje: {len(self.geolocations)}",
             f"  Przeglądarki: {len(self.browsers)}",
+            f"  Zdjęcia certyfikowane: {sum(len(v) for v in self.certified_photos.values())}",
             f"  Estimate Total BTC: {self.estimate_total_btc}",
             f"  Salda walut: {len(self.asset_balances)}",
             f"  Transakcje Spot: {len(self.spot_transactions)}",

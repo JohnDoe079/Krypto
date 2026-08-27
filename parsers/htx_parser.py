@@ -1,5 +1,6 @@
 """Parser raportów użytkownika HTX w formacie .xlsx."""
 
+import os
 import pandas as pd
 from pathlib import Path
 from typing import Dict
@@ -22,6 +23,40 @@ class HTXReportParser:
             source_file=self.file_path.name,
             exchange="htx"
         )
+        # Wykryj katalog certified_photos obok pliku XLSX
+        self._load_certified_photos()
+
+    def _load_certified_photos(self):
+        """Skanuje katalog certified_photos/ obok pliku .xlsx i przypisuje zdjęcia per UID."""
+        certified_dir = self.file_path.parent / "certified_photos"
+        if not certified_dir.exists() or not certified_dir.is_dir():
+            print(f"  [!] Nie znaleziono katalogu certified_photos w: {certified_dir}")
+            return
+
+        for uid_dir in certified_dir.iterdir():
+            if not uid_dir.is_dir():
+                continue
+            uid = uid_dir.name.strip()
+            # Akceptuj tylko katalogi o nazwie numerycznej (UID)
+            if not uid.isdigit():
+                continue
+
+            photos = []
+            for ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"):
+                photos.extend(sorted(uid_dir.glob(f"*{ext}")))
+                photos.extend(sorted(uid_dir.glob(f"*{ext.upper()}")))
+
+            # Usuń duplikaty zachowując kolejność
+            seen = set()
+            unique_photos = []
+            for p in photos:
+                if p.name not in seen:
+                    seen.add(p.name)
+                    unique_photos.append(str(p))
+
+            if unique_photos:
+                self.identifiers.certified_photos[uid] = unique_photos
+                print(f"  [ZDJĘCIA] UID {uid}: znaleziono {len(unique_photos)} zdjęć w {uid_dir}")
 
     def parse_all(self) -> ExtractedIdentifiers:
         all_sheets = self.xl.sheet_names
@@ -98,6 +133,9 @@ class HTXReportParser:
                 self.identifiers.user_ids.add(uid_str)
                 if uid_str not in self.identifiers.wallet_addresses_by_user:
                     self.identifiers.wallet_addresses_by_user[uid_str] = []
+                # Upewnij się, że certified_photos ma wpis dla tego UID
+                if uid_str not in self.identifiers.certified_photos:
+                    self.identifiers.certified_photos[uid_str] = []
 
             # --- Dane osobowe ---
             name = clean_val(row.iloc[col_map["name"]]) if "name" in col_map else None

@@ -271,6 +271,147 @@ class ReportGenerator:
                  for col, val in rest]
         return rows
 
+    # ========================================================================
+    # HTX: NOWA STRUKTURA RAPORTU — PROFIL UŻYTKOWNIKA
+    # ========================================================================
+
+    def _render_htx_profile(self, r: ExtractedIdentifiers):
+        """Renderuje pełny profil HTX: dane użytkownika → zdjęcia → portfele → transakcje."""
+        htx_data = r.customer_info_sections.get("HTX Register", {})
+        if not htx_data:
+            self._add_paragraph("Brak danych rejestracyjnych HTX.")
+            return
+
+        self._add_heading("Profil użytkownika HTX", level=3)
+
+        # Dla każdego UID wygeneruj kartę profilu
+        for uid in sorted(htx_data.keys()):
+            user_data = htx_data[uid]
+            if uid.startswith("row_"):
+                # Brak UID — pokaż jako anonimowy wiersz
+                self._add_heading(f"Wiersz bez UID ({uid})", level=4)
+                rows = [[k, v] for k, v in user_data.items()]
+                self._add_table(["Pole", "Wartość"], rows, max_rows=50)
+                continue
+
+            self._render_htx_user_card(r, uid, user_data)
+
+        # Portfele (globalna sekcja, jeśli nie była w karcie)
+        self._render_htx_wallets(r)
+
+        # Transakcje (jeśli dostępne)
+        self._render_currency_flows(r)
+
+    def _render_htx_user_card(self, r: ExtractedIdentifiers, uid: str, user_data: Dict[str, str]):
+        """Renderuje kartę pojedynczego użytkownika HTX z danymi + zdjęciami."""
+        # Nagłówek karty
+        self._add_heading(f"Użytkownik HTX — UID: {uid}", level=4)
+
+        # --- DANE PODSTAWOWE (uporządkowane) ---
+        # Mapowanie nazw pól na ładne etykiety
+        field_labels = {
+            "uid": "UID użytkownika",
+            "name": "Imię i nazwisko",
+            "email": "E-mail",
+            "phone": "Telefon",
+            "idcard": "Numer dokumentu",
+            "gmt_created": "Data utworzenia konta",
+            "country": "Kraj rejestracji",
+            "balance": "Saldo",
+            "bankcard": "Karta bankowa",
+            "alipay": "Alipay",
+            "wechat": "WeChat",
+            "user_address": "Adres portfela (user_address)",
+        }
+
+        # Priorytetowa kolejność pól
+        priority_fields = ["uid", "gmt_created", "name", "email", "phone", "idcard", "country"]
+        profile_rows = []
+
+        for field_key in priority_fields:
+            if field_key in user_data:
+                label = field_labels.get(field_key, field_key)
+                val = user_data[field_key]
+                profile_rows.append([label, str(val) if val else "(puste)"])
+
+        # Pozostałe pola
+        for field_key, val in user_data.items():
+            if field_key in priority_fields:
+                continue
+            label = field_labels.get(field_key, field_key)
+            profile_rows.append([label, str(val) if val else "(puste)"])
+
+        if profile_rows:
+            self._add_table(["Pole", "Wartość"], profile_rows, max_rows=50)
+
+        # --- ZDJĘCIA CERTYFIKOWANE ---
+        self._render_htx_photos(r, uid)
+
+        # --- PORTFELE TEGO UŻYTKOWNIKA ---
+        wallets = r.wallet_addresses_by_user.get(uid, [])
+        if wallets:
+            self._add_paragraph("Przypisane adresy portfeli:", bold=True)
+            wallet_rows = [[str(i+1), addr] for i, addr in enumerate(sorted(wallets))]
+            self._add_table(["Lp.", "Adres portfela"], wallet_rows, max_rows=20)
+        else:
+            self._add_paragraph("Brak przypisanych adresów portfeli.", color=RGBColor(0x80, 0x80, 0x80))
+
+        self._add_paragraph("")  # odstęp między użytkownikami
+
+    def _render_htx_photos(self, r: ExtractedIdentifiers, uid: str):
+        """Renderuje zdjęcia certyfikowane dla danego UID w tabeli."""
+        photos = r.certified_photos.get(uid, [])
+        if not photos:
+            return
+
+        self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)}):", bold=True)
+
+        # Tabela z zdjęciami — max 3 kolumny (bo zazwyczaj są 3 zdjęcia)
+        n_cols = min(3, len(photos))
+        n_rows = (len(photos) + n_cols - 1) // n_cols
+        table = self.doc.add_table(rows=n_rows, cols=n_cols)
+        table.style = 'Table Grid'
+        table.alignment = WD_TABLE_ALIGNMENT.LEFT
+        table.autofit = False
+        table.allow_autofit = False
+
+        col_w = Inches(PAGE_WIDTH_INCHES / n_cols)
+        for i in range(n_cols):
+            table.columns[i].width = col_w
+
+        for img_idx, img_path in enumerate(photos):
+            row_idx = img_idx // n_cols
+            col_idx = img_idx % n_cols
+            cell = table.cell(row_idx, col_idx)
+            cell.text = ""
+            if os.path.exists(img_path):
+                try:
+                    p = cell.paragraphs[0]
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run = p.add_run()
+                    # Dostosuj szerokość zdjęcia do kolumny
+                    img_width = Inches(2.2) if n_cols >= 3 else Inches(3.0)
+                    run.add_picture(img_path, width=img_width)
+                except Exception as e:
+                    cell.text = f"[!] Błąd: {e}"
+            else:
+                cell.text = "Brak pliku"
+
+    def _render_htx_wallets(self, r: ExtractedIdentifiers):
+        """Globalna sekcja portfeli HTX (podsumowanie wszystkich UID)."""
+        if not r.wallet_addresses_by_user:
+            return
+
+        self._add_heading("Portfele kryptowalutowe (podsumowanie)", level=3)
+        rows = []
+        for uid, addrs in sorted(r.wallet_addresses_by_user.items()):
+            rows.append([str(uid), ", ".join(sorted(addrs)), str(len(addrs))])
+        self._add_table(["UID", "Adresy portfeli", "Liczba"], rows, max_rows=50)
+
+    # ========================================================================
+    # KONIEC HTX
+    # ========================================================================
+
     def _render_customer_info(self, r: ExtractedIdentifiers):
         if not r.customer_info_sections:
             return
@@ -284,6 +425,7 @@ class ReportGenerator:
                 rows = self._sort_basic_info(data)
             elif sec_name == "HTX Register":
                 # HTX Register ma strukturę: {uid: {col: val, ...}}
+                # Dla Binance (exchange != htx) renderujemy stare stylem
                 rows = []
                 for uid_key, row_data in data.items():
                     for col, val in row_data.items():
@@ -660,19 +802,24 @@ class ReportGenerator:
                     bold=True, color=RGBColor(0x00, 0x40, 0x80))
             self._add_paragraph("")
 
-            # Sekcje statyczne
-            for sheet_name in r.parsed_sheets:
-                if sheet_name == "Customer Information":
-                    self._render_customer_info(r)
-                elif sheet_name == "KYC Documents":
-                    self._render_kyc(r)
-                elif sheet_name == "Assets Overview":
-                    self._render_assets_overview(r)
-                elif sheet_name == "register_1":
-                    self._render_customer_info(r)
+            # ===== HTX: NOWA STRUKTURA RAPORTU =====
+            if r.exchange == "htx":
+                # HTX: Profil użytkownika → Portfele → Transakcje
+                self._render_htx_profile(r)
+            else:
+                # Binance: klasyczna struktura
+                for sheet_name in r.parsed_sheets:
+                    if sheet_name == "Customer Information":
+                        self._render_customer_info(r)
+                    elif sheet_name == "KYC Documents":
+                        self._render_kyc(r)
+                    elif sheet_name == "Assets Overview":
+                        self._render_assets_overview(r)
+                    elif sheet_name == "register_1":
+                        self._render_customer_info(r)
 
-            # Nowa sekcja transakcyjna — per waluta, wszystkie źródła razem
-            self._render_currency_flows(r)
+                # Nowa sekcja transakcyjna — per waluta, wszystkie źródła razem
+                self._render_currency_flows(r)
 
             self.doc.add_page_break()
 
@@ -728,6 +875,15 @@ class ReportGenerator:
                 for uid_val, addrs in sorted(r.wallet_addresses_by_user.items()):
                     wallet_rows.append([str(uid_val), ", ".join(sorted(addrs))])
                 self._add_table(["UID", "Adresy portfeli"], wallet_rows, max_rows=50)
+
+            # --- HTX: zdjęcia certyfikowane per UID ---
+            if r.certified_photos:
+                self._add_paragraph(f"Zdjęcia certyfikowane ({sum(len(v) for v in r.certified_photos.values())} zdjęć):", bold=True)
+                photo_rows = []
+                for uid_val, paths in sorted(r.certified_photos.items()):
+                    for p in paths:
+                        photo_rows.append([str(uid_val), os.path.basename(p), p])
+                self._add_table(["UID", "Nazwa pliku", "Ścieżka"], photo_rows, max_rows=50)
 
             id_sections = [
                 ("E-maile", r.emails), ("Numery telefonów", r.phones),
