@@ -303,11 +303,10 @@ class ReportGenerator:
         self._render_currency_flows(r)
 
     def _render_htx_user_card(self, r: ExtractedIdentifiers, uid: str, user_data: Dict[str, str]):
-        """Renderuje kartę pojedynczego użytkownika HTX z danymi + portfele + zdjęcia."""
-        # Nagłówek karty
+        """Renderuje kartę pojedynczego użytkownika HTX: dane → zdjęcia → portfele."""
         self._add_heading(f"Użytkownik HTX — UID: {uid}", level=4)
 
-        # --- DANE PODSTAWOWE + PORTFELE W JEDNEJ TABELI ---
+        # --- 1. TABELA DANYCH OSOBOWYCH ---
         field_labels = {
             "uid": "UID użytkownika",
             "name": "Imię i nazwisko",
@@ -320,42 +319,42 @@ class ReportGenerator:
             "bankcard": "Karta bankowa",
             "alipay": "Alipay",
             "wechat": "WeChat",
-            "user_address": "Adres portfela (user_address)",
         }
 
-        # Priorytetowa kolejność pól
         priority_fields = ["uid", "gmt_created", "name", "email", "phone", "idcard", "country"]
         profile_rows = []
+
+        def _fmt_val(val):
+            s = str(val) if val is not None else "(puste)"
+            if s.endswith(".0"):
+                s = s[:-2]
+            return s
 
         for field_key in priority_fields:
             if field_key in user_data:
                 label = field_labels.get(field_key, field_key)
-                val = user_data[field_key]
-                profile_rows.append([label, str(val) if val else "(puste)"])
+                profile_rows.append([label, _fmt_val(user_data[field_key])])
 
-        # Pozostałe pola (bez user_address — portfele dodamy osobno)
         for field_key, val in user_data.items():
             if field_key in priority_fields or field_key == "user_address":
                 continue
             label = field_labels.get(field_key, field_key)
-            profile_rows.append([label, str(val) if val else "(puste)"])
-
-        # --- PORTFELE W TEJ SAMEJ TABELI ---
-        wallets = r.wallet_addresses_by_user.get(uid, [])
-        if wallets:
-            if len(wallets) == 1:
-                profile_rows.append(["Adres portfela", sorted(wallets)[0]])
-            else:
-                for i, addr in enumerate(sorted(wallets), 1):
-                    profile_rows.append([f"Adres portfela {i}", addr])
-        else:
-            profile_rows.append(["Adresy portfeli", "(brak)"])
+            profile_rows.append([label, _fmt_val(val)])
 
         if profile_rows:
             self._add_table(["Pole", "Wartość"], profile_rows, max_rows=50)
 
-        # --- ZDJĘCIA CERTYFIKOWANE ---
+        # --- 2. ZDJĘCIA CERTYFIKOWANE ---
         self._render_htx_photos(r, uid)
+
+        # --- 3. TABELA PORTFELI (osobna, na końcu) ---
+        wallets = r.wallet_addresses_by_user.get(uid, [])
+        if wallets:
+            self._add_paragraph("Adresy portfeli kryptowalutowych:", bold=True)
+            wallet_rows = [[str(i+1), addr] for i, addr in enumerate(sorted(wallets))]
+            self._add_table(["Lp.", "Adres portfela"], wallet_rows, max_rows=20)
+        else:
+            self._add_paragraph("Brak przypisanych adresów portfeli.", color=RGBColor(0x80, 0x80, 0x80))
 
         self._add_paragraph("")  # odstęp między użytkownikami
 
@@ -762,16 +761,27 @@ class ReportGenerator:
             time_summary = ""
             if all_from and all_to:
                 time_summary = f"{min(all_from)} -> {max(all_to)}"
-            summary_rows.append([
-                r.source_file, r.exchange.upper(), str(len(r.parsed_sheets)),
-                ", ".join(sorted(r.user_ids)) if r.user_ids else "(brak)",
-                str(len(r.related_user_ids)), str(len(r.emails)),
-                str(len(r.ips)), str(len(r.wallet_addresses)), str(len(r.txids)),
-                r.estimate_total_btc if r.estimate_total_btc else "(brak)",
-                str(len(r.asset_balances)), time_summary,
-            ])
+
+            # Dla każdego UID osobny wiersz (HTX: wiele użytkowników per plik)
+            uids = sorted(r.user_ids) if r.user_ids else [""]
+            for uid in uids:
+                wallet_count = len(r.wallet_addresses_by_user.get(uid, [])) if uid else len(r.wallet_addresses)
+                summary_rows.append([
+                    r.source_file,
+                    r.exchange.upper(),
+                    str(len(r.parsed_sheets)),
+                    uid if uid else "(brak)",
+                    str(len(r.related_user_ids)),
+                    str(len(r.emails)),
+                    str(len(r.ips)),
+                    str(wallet_count),
+                    str(len(r.txids)),
+                    r.estimate_total_btc if r.estimate_total_btc else "(brak)",
+                    str(len(r.asset_balances)),
+                    time_summary,
+                ])
         self._add_table(
-            ["Plik", "Giełda", "Arkusze", "ID właściciela", "ID powiązanych",
+            ["Plik", "Giełda", "Arkusze", "UID użytkownika", "ID powiązanych",
              "E-maile", "IP", "Portfele", "TXID", "Est. Total BTC", "Salda", "Zakres czasowy"],
             summary_rows)
         self.doc.add_page_break()

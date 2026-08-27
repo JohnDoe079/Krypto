@@ -54,6 +54,16 @@ class HTXReportParser:
             self.identifiers.unknown_sheets.append(sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
 
+    def _clean_htx_val(self, val):
+        """Czyści wartość z HTX Excela — usuwa .0 z floatów."""
+        v = clean_val(val)
+        if v is None:
+            return None
+        s = str(v).strip()
+        if s.endswith(".0"):
+            s = s[:-2]
+        return s if s else None
+
     def _match_certified_photos(self):
         """Dopasowuje foldery ze zdjęciami do UID. Folder może być prefiksem UID (krótszy o 1+ znaków)."""
         certified_dir = self.file_path.parent / "certified_photos"
@@ -137,7 +147,7 @@ class HTXReportParser:
             self.identifiers.customer_info_sections["HTX Register"] = {}
 
         for _, row in df.iterrows():
-            uid = clean_val(row.iloc[col_map["uid"]]) if "uid" in col_map else None
+            uid = self._clean_htx_val(row.iloc[col_map["uid"]]) if "uid" in col_map else None
             uid_str = str(uid).strip() if uid else None
 
             # --- UID (właściciel konta) ---
@@ -149,28 +159,28 @@ class HTXReportParser:
                     self.identifiers.certified_photos[uid_str] = []
 
             # --- Dane osobowe ---
-            name = clean_val(row.iloc[col_map["name"]]) if "name" in col_map else None
+            name = self._clean_htx_val(row.iloc[col_map["name"]]) if "name" in col_map else None
             if name:
                 self.identifiers.names.add(str(name))
 
-            email = clean_val(row.iloc[col_map["email"]]) if "email" in col_map else None
+            email = self._clean_htx_val(row.iloc[col_map["email"]]) if "email" in col_map else None
             if email:
                 email_clean = extract_email(str(email))
                 if email_clean:
                     self.identifiers.emails.add(email_clean)
 
-            phone = clean_val(row.iloc[col_map["phone"]]) if "phone" in col_map else None
+            phone = self._clean_htx_val(row.iloc[col_map["phone"]]) if "phone" in col_map else None
             if phone:
                 phone_clean = extract_phone(str(phone))
                 if phone_clean:
                     self.identifiers.phones.add(phone_clean)
 
-            idcard = clean_val(row.iloc[col_map["idcard"]]) if "idcard" in col_map else None
+            idcard = self._clean_htx_val(row.iloc[col_map["idcard"]]) if "idcard" in col_map else None
             if idcard:
                 self.identifiers.id_numbers.add(str(idcard))
 
             # --- Adres portfela (user_address) ---
-            user_address = clean_val(row.iloc[col_map["user_address"]]) if "user_address" in col_map else None
+            user_address = self._clean_htx_val(row.iloc[col_map["user_address"]]) if "user_address" in col_map else None
             if user_address:
                 addr = str(user_address).strip()
                 if is_wallet_address(addr):
@@ -180,12 +190,12 @@ class HTXReportParser:
                             self.identifiers.wallet_addresses_by_user[uid_str].append(addr)
 
             # --- Kraj / Geolokalizacja ---
-            country = clean_val(row.iloc[col_map["country"]]) if "country" in col_map else None
+            country = self._clean_htx_val(row.iloc[col_map["country"]]) if "country" in col_map else None
             if country:
                 self.identifiers.geolocations.add(str(country))
 
             # --- Data rejestracji ---
-            gmt_created = clean_val(row.iloc[col_map["gmt_created"]]) if "gmt_created" in col_map else None
+            gmt_created = self._clean_htx_val(row.iloc[col_map["gmt_created"]]) if "gmt_created" in col_map else None
             if gmt_created:
                 self.identifiers.time_ranges[sheet_name] = {
                     "from": str(gmt_created),
@@ -193,22 +203,22 @@ class HTXReportParser:
                 }
 
             # --- Pozostałe dane płatnicze (bankcard, alipay, wechat) ---
-            bankcard = clean_val(row.iloc[col_map["bankcard"]]) if "bankcard" in col_map else None
+            bankcard = self._clean_htx_val(row.iloc[col_map["bankcard"]]) if "bankcard" in col_map else None
             if bankcard:
                 self.identifiers.account_numbers.add(f"bankcard:{bankcard}")
 
-            alipay = clean_val(row.iloc[col_map["alipay"]]) if "alipay" in col_map else None
+            alipay = self._clean_htx_val(row.iloc[col_map["alipay"]]) if "alipay" in col_map else None
             if alipay:
                 self.identifiers.account_numbers.add(f"alipay:{alipay}")
 
-            wechat = clean_val(row.iloc[col_map["wechat"]]) if "wechat" in col_map else None
+            wechat = self._clean_htx_val(row.iloc[col_map["wechat"]]) if "wechat" in col_map else None
             if wechat:
                 self.identifiers.account_numbers.add(f"wechat:{wechat}")
 
             # --- Zapis pełnego wiersza do customer_info_sections ---
             row_data = {}
             for col_name, col_idx in col_map.items():
-                val = clean_val(row.iloc[col_idx])
+                val = self._clean_htx_val(row.iloc[col_idx])
                 if val is not None:
                     row_data[col_name] = str(val)
 
