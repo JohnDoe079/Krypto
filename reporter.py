@@ -359,14 +359,25 @@ class ReportGenerator:
         self._add_paragraph("")  # odstęp między użytkownikami
 
     def _render_htx_photos(self, r: ExtractedIdentifiers, uid: str):
-        """Renderuje zdjęcia certyfikowane dla danego UID w tabeli."""
+        """Renderuje zdjęcia certyfikowane dla danego UID w tabeli.
+
+        Jeśli zdjęcie >1MB, nie osadza się w DOCX (zbyt duże), tylko pokazuje ścieżkę.
+        """
         photos = r.certified_photos.get(uid, [])
         if not photos:
             return
 
+        # Sprawdź rozmiary — jeśli suma >5MB, pokaż tylko listę
+        total_size = sum(os.path.getsize(p) for p in photos if os.path.exists(p))
+        if total_size > 5 * 1024 * 1024:
+            self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)} plików, {total_size/1024/1024:.1f} MB — za duże do osadzenia w raporcie):", bold=True)
+            rows = [[str(i+1), os.path.basename(p), p] for i, p in enumerate(photos)]
+            self._add_table(["Lp.", "Nazwa pliku", "Ścieżka"], rows, max_rows=20)
+            return
+
         self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)}):", bold=True)
 
-        # Tabela z zdjęciami — max 3 kolumny (bo zazwyczaj są 3 zdjęcia)
+        # Tabela z zdjęciami — max 3 kolumny
         n_cols = min(3, len(photos))
         n_rows = (len(photos) + n_cols - 1) // n_cols
         table = self.doc.add_table(rows=n_rows, cols=n_cols)
@@ -385,15 +396,19 @@ class ReportGenerator:
             cell = table.cell(row_idx, col_idx)
             cell.text = ""
             if os.path.exists(img_path):
-                try:
-                    p = cell.paragraphs[0]
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = p.add_run()
-                    # Dostosuj szerokość zdjęcia do kolumny
-                    img_width = Inches(2.2) if n_cols >= 3 else Inches(3.0)
-                    run.add_picture(img_path, width=img_width)
-                except Exception as e:
-                    cell.text = f"[!] Błąd: {e}"
+                # Jeśli plik >1MB, nie osadzaj — za duży
+                file_size = os.path.getsize(img_path)
+                if file_size > 1024 * 1024:
+                    cell.text = f"{os.path.basename(img_path)}\n({file_size/1024/1024:.1f} MB — za duże)"
+                else:
+                    try:
+                        p = cell.paragraphs[0]
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run = p.add_run()
+                        img_width = Inches(1.2) if n_cols >= 3 else Inches(1.8)
+                        run.add_picture(img_path, width=img_width)
+                    except Exception as e:
+                        cell.text = f"[!] Błąd: {e}"
             else:
                 cell.text = "Brak pliku"
 
@@ -766,23 +781,34 @@ class ReportGenerator:
             uids = sorted(r.user_ids) if r.user_ids else [""]
             for uid in uids:
                 wallet_count = len(r.wallet_addresses_by_user.get(uid, [])) if uid else len(r.wallet_addresses)
+
+                # Dla HTX: wyciągnij dane per UID z customer_info_sections
+                email_per_uid = ""
+                phone_per_uid = ""
+                name_per_uid = ""
+                balance_per_uid = ""
+                if r.exchange == "htx" and uid and "HTX Register" in r.customer_info_sections:
+                    user_data = r.customer_info_sections["HTX Register"].get(uid, {})
+                    email_per_uid = user_data.get("email", "")
+                    phone_per_uid = user_data.get("phone", "")
+                    name_per_uid = user_data.get("name", "")
+                    balance_per_uid = user_data.get("balance", "")
+
                 summary_rows.append([
                     r.source_file,
                     r.exchange.upper(),
                     str(len(r.parsed_sheets)),
                     uid if uid else "(brak)",
-                    str(len(r.related_user_ids)),
-                    str(len(r.emails)),
-                    str(len(r.ips)),
+                    name_per_uid,
+                    email_per_uid,
+                    phone_per_uid,
                     str(wallet_count),
-                    str(len(r.txids)),
-                    r.estimate_total_btc if r.estimate_total_btc else "(brak)",
+                    balance_per_uid,
                     str(len(r.asset_balances)),
                     time_summary,
                 ])
         self._add_table(
-            ["Plik", "Giełda", "Arkusze", "UID użytkownika", "ID powiązanych",
-             "E-maile", "IP", "Portfele", "TXID", "Est. Total BTC", "Salda", "Zakres czasowy"],
+            ["Plik", "Giełda", "Arkusze", "UID", "Imię i nazwisko", "E-mail", "Telefon", "Portfele", "Saldo", "Salda walut", "Zakres czasowy"],
             summary_rows)
         self.doc.add_page_break()
 
@@ -815,8 +841,15 @@ class ReportGenerator:
 
             # ===== HTX: NOWA STRUKTURA RAPORTU =====
             if r.exchange == "htx":
-                # HTX: Profil użytkownika → Portfele → Transakcje
+                print(f"    [DOCX] Profil użytkownika...")
                 self._render_htx_profile(r)
+                print(f"    [DOCX] Logowania...")
+                self._render_htx_logins(r)
+                print(f"    [DOCX] Urządzenia...")
+                self._render_htx_devices(r)
+                print(f"    [DOCX] Transakcje...")
+                self._render_htx_transactions(r)
+                print(f"    [DOCX] OK")
             else:
                 # Binance: klasyczna struktura
                 for sheet_name in r.parsed_sheets:
@@ -915,5 +948,205 @@ class ReportGenerator:
                     self._add_paragraph(f"{title} ({len(items)}):", bold=True)
                     rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(items))]
                     self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
+
+
+    # ========================================================================
+    # HTX: NOWE SEKCJE — Logowania, Urządzenia, Transakcje
+    # ========================================================================
+
+    def _render_htx_logins(self, r: ExtractedIdentifiers):
+        """Renderuje logowania HTX w DOCX — max 50 wierszy."""
+        login_sheets = [s for s in r.parsed_sheets if s == "login_1"]
+        if not login_sheets and not r.ips and not r.geolocations and not r.browsers:
+            return
+        self._add_heading("Historia logowania", level=3)
+        # Zakres czasowy
+        for sheet_name in login_sheets:
+            if sheet_name in r.time_ranges:
+                tr = r.time_ranges[sheet_name]
+                self._add_paragraph(f"Zakres czasowy: {tr['from']} → {tr['to']}")
+        # IP
+        if r.ips:
+            self._add_paragraph(f"Unikalne adresy IP ({len(r.ips)}):", bold=True)
+            rows = [[str(i+1), ip] for i, ip in enumerate(sorted(r.ips)[:50])]
+            self._add_table(["Lp.", "Adres IP"], rows, max_rows=50)
+            if len(r.ips) > 50:
+                self._add_paragraph(f"... i {len(r.ips)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+        # Geolokalizacje
+        if r.geolocations:
+            self._add_paragraph(f"Lokalizacje ({len(r.geolocations)}):", bold=True)
+            rows = [[str(i+1), loc] for i, loc in enumerate(sorted(r.geolocations)[:50])]
+            self._add_table(["Lp.", "Lokalizacja"], rows, max_rows=50)
+            if len(r.geolocations) > 50:
+                self._add_paragraph(f"... i {len(r.geolocations)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+        # Przeglądarki
+        if r.browsers:
+            self._add_paragraph(f"Przeglądarki / User Agent ({len(r.browsers)}):", bold=True)
+            rows = [[str(i+1), br] for i, br in enumerate(sorted(r.browsers)[:50])]
+            self._add_table(["Lp.", "Przeglądarka"], rows, max_rows=50)
+            if len(r.browsers) > 50:
+                self._add_paragraph(f"... i {len(r.browsers)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+    def _render_htx_devices(self, r: ExtractedIdentifiers):
+        """Renderuje skrót urządzeń HTX (DeviceFP_1)."""
+        device_sheets = [s for s in r.parsed_sheets if s == "DeviceFP_1"]
+        if not device_sheets and not r.device_ids:
+            return
+        self._add_heading("Urządzenia zatwierdzone (skrót)", level=3)
+        if r.device_ids:
+            self._add_paragraph(f"Liczba unikalnych urządzeń / odcisków: {len(r.device_ids)}")
+            rows = [[str(i+1), dev[:80]] for i, dev in enumerate(sorted(r.device_ids)[:20])]
+            if rows:
+                self._add_table(["Lp.", "ID urządzenia"], rows, max_rows=20)
+            if len(r.device_ids) > 20:
+                self._add_paragraph(f"... i {len(r.device_ids)-20} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+    def _render_htx_logins(self, r: ExtractedIdentifiers):
+        """Renderuje logowania HTX w DOCX — max 50 wierszy."""
+        login_sheets = [s for s in r.parsed_sheets if s == "login_1"]
+        if not login_sheets and not r.ips and not r.geolocations and not r.browsers:
+            return
+        self._add_heading("Historia logowania", level=3)
+        # Zakres czasowy
+        for sheet_name in login_sheets:
+            if sheet_name in r.time_ranges:
+                tr = r.time_ranges[sheet_name]
+                self._add_paragraph(f"Zakres czasowy: {tr['from']} → {tr['to']}")
+        # IP
+        if r.ips:
+            self._add_paragraph(f"Unikalne adresy IP ({len(r.ips)}):", bold=True)
+            rows = [[str(i+1), ip] for i, ip in enumerate(sorted(r.ips)[:50])]
+            self._add_table(["Lp.", "Adres IP"], rows, max_rows=50)
+            if len(r.ips) > 50:
+                self._add_paragraph(f"... i {len(r.ips)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+        # Geolokalizacje
+        if r.geolocations:
+            self._add_paragraph(f"Lokalizacje ({len(r.geolocations)}):", bold=True)
+            rows = [[str(i+1), loc] for i, loc in enumerate(sorted(r.geolocations)[:50])]
+            self._add_table(["Lp.", "Lokalizacja"], rows, max_rows=50)
+            if len(r.geolocations) > 50:
+                self._add_paragraph(f"... i {len(r.geolocations)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+        # Przeglądarki
+        if r.browsers:
+            self._add_paragraph(f"Przeglądarki / User Agent ({len(r.browsers)}):", bold=True)
+            rows = [[str(i+1), br] for i, br in enumerate(sorted(r.browsers)[:50])]
+            self._add_table(["Lp.", "Przeglądarka"], rows, max_rows=50)
+            if len(r.browsers) > 50:
+                self._add_paragraph(f"... i {len(r.browsers)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+    def _render_htx_devices(self, r: ExtractedIdentifiers):
+        """Renderuje skrót urządzeń HTX (DeviceFP_1)."""
+        device_sheets = [s for s in r.parsed_sheets if s == "DeviceFP_1"]
+        if not device_sheets and not r.device_ids:
+            return
+        self._add_heading("Urządzenia zatwierdzone (skrót)", level=3)
+        if r.device_ids:
+            self._add_paragraph(f"Liczba unikalnych urządzeń / odcisków: {len(r.device_ids)}")
+            rows = [[str(i+1), dev[:80]] for i, dev in enumerate(sorted(r.device_ids)[:20])]
+            if rows:
+                self._add_table(["Lp.", "ID urządzenia"], rows, max_rows=20)
+            if len(r.device_ids) > 20:
+                self._add_paragraph(f"... i {len(r.device_ids)-20} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+    def _render_htx_transactions(self, r: ExtractedIdentifiers):
+        """Renderuje transakcje HTX w DOCX — max 50 wierszy per typ.
+        Pełne dane w pliku JSON.
+        """
+        has_txns = (r.deposit_transactions or r.withdrawal_transactions or
+                    r.spot_transactions or r.funding_transactions)
+        if not has_txns:
+            return
+        self._add_heading("Transakcje HTX", level=3)
+
+        # Liczby
+        counts = []
+        if r.deposit_transactions:
+            counts.append(f"Depozyty: {len(r.deposit_transactions)}")
+        if r.withdrawal_transactions:
+            counts.append(f"Wypłaty: {len(r.withdrawal_transactions)}")
+        if r.spot_transactions:
+            counts.append(f"Trade/Spot: {len(r.spot_transactions)}")
+        if r.funding_transactions:
+            counts.append(f"Funding: {len(r.funding_transactions)}")
+        self._add_paragraph(" | ".join(counts))
+
+        # Deposit — max 50
+        if r.deposit_transactions:
+            self._add_heading("Depozyty (pierwsze 50)", level=4)
+            rows = []
+            for t in sorted(r.deposit_transactions, key=lambda x: x.time or "")[:50]:
+                rows.append([
+                    t.time[:19] if t.time else "",
+                    t.currency,
+                    t.change,
+                    t.reason,
+                    t.transaction_id[:20] if t.transaction_id else "—",
+                    t.source_sheet,
+                ])
+            self._add_table(["Czas", "Waluta", "Zmiana", "Powód", "TxID", "Źródło"], rows, max_rows=50)
+            if len(r.deposit_transactions) > 50:
+                self._add_paragraph(f"... i {len(r.deposit_transactions)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+        # Withdrawal — max 50
+        if r.withdrawal_transactions:
+            self._add_heading("Wypłaty (pierwsze 50)", level=4)
+            rows = []
+            for t in sorted(r.withdrawal_transactions, key=lambda x: x.time or "")[:50]:
+                rows.append([
+                    t.time[:19] if t.time else "",
+                    t.currency,
+                    t.change,
+                    t.reason,
+                    t.transaction_id[:20] if t.transaction_id else "—",
+                    t.source_sheet,
+                ])
+            self._add_table(["Czas", "Waluta", "Zmiana", "Powód", "TxID", "Źródło"], rows, max_rows=50)
+            if len(r.withdrawal_transactions) > 50:
+                self._add_paragraph(f"... i {len(r.withdrawal_transactions)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+        # Spot/Trade — max 50
+        if r.spot_transactions:
+            self._add_heading("Trade/Spot (pierwsze 50)", level=4)
+            rows = []
+            for t in sorted(r.spot_transactions, key=lambda x: x.time or "")[:50]:
+                rows.append([
+                    t.time[:19] if t.time else "",
+                    t.currency,
+                    t.change,
+                    t.reason,
+                    t.transaction_id[:20] if t.transaction_id else "—",
+                    t.source_sheet,
+                ])
+            self._add_table(["Czas", "Waluta", "Zmiana", "Powód", "Order ID", "Źródło"], rows, max_rows=50)
+            if len(r.spot_transactions) > 50:
+                self._add_paragraph(f"... i {len(r.spot_transactions)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
+
+        # Bilans per waluta
+        all_txns = r.deposit_transactions + r.withdrawal_transactions + r.spot_transactions + r.funding_transactions
+        from collections import defaultdict
+        per_curr = defaultdict(lambda: {"in": 0.0, "out": 0.0, "count": 0})
+        for t in all_txns:
+            curr = t.currency.upper() if t.currency else "UNKNOWN"
+            try:
+                chg = float(t.change) if t.change else 0.0
+            except:
+                chg = 0.0
+            per_curr[curr]["count"] += 1
+            if chg > 0: per_curr[curr]["in"] += chg
+            elif chg < 0: per_curr[curr]["out"] += abs(chg)
+
+        if per_curr:
+            self._add_heading("Bilans per waluta", level=4)
+            rows = []
+            for curr, data in sorted(per_curr.items()):
+                net = data["in"] - data["out"]
+                rows.append([
+                    curr,
+                    f"+{data['in']:.8f}".rstrip('0').rstrip('.'),
+                    f"-{data['out']:.8f}".rstrip('0').rstrip('.'),
+                    f"{net:+.8f}".rstrip('0').rstrip('.'),
+                    str(data["count"]),
+                ])
+            self._add_table(["Waluta", "Przychody", "Rozchody", "Netto", "Liczba trans."], rows, max_rows=50)
 
         self.doc.save(self.output_path)

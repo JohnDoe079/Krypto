@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings('ignore', message='Workbook contains no default style')
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
