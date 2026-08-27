@@ -79,6 +79,7 @@ class ExtractedIdentifiers:
     phones: Set[str] = field(default_factory=set)
     ips: Set[str] = field(default_factory=set)
     wallet_addresses: Set[str] = field(default_factory=set)
+    wallet_addresses_by_user: Dict[str, List[str]] = field(default_factory=dict)
     txids: Set[str] = field(default_factory=set)
     card_bins: Set[str] = field(default_factory=set)
     card_last4: Set[str] = field(default_factory=set)
@@ -124,6 +125,10 @@ class ExtractedIdentifiers:
             "phones": sorted(self.phones),
             "ips": sorted(self.ips),
             "wallet_addresses": sorted(self.wallet_addresses),
+            "wallet_addresses_by_user": {
+                uid: sorted(addrs)
+                for uid, addrs in self.wallet_addresses_by_user.items()
+            },
             "txids": sorted(self.txids),
             "card_bins": sorted(self.card_bins),
             "card_last4": sorted(self.card_last4),
@@ -166,6 +171,7 @@ class ExtractedIdentifiers:
             f"  Numery telefonów: {len(self.phones)}",
             f"  IP: {len(self.ips)}",
             f"  Adresy portfeli: {len(self.wallet_addresses)}",
+            f"  Adresy portfeli per UID: {sum(len(v) for v in self.wallet_addresses_by_user.values())}",
             f"  TXID: {len(self.txids)}",
             f"  BIN kart: {len(self.card_bins)}",
             f"  Ostatnie 4 cyfry kart: {len(self.card_last4)}",

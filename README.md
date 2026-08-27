@@ -1,4 +1,4 @@
-# Krypto
+# Krypto v1.1.0
 
 **Parser i komparator raportów giełdowych kryptowalutowych**
 
@@ -14,13 +14,14 @@ Krypto/
 ├── config.py               # Konfiguracja arkuszy i katalogów danych
 ├── matcher.py              # Moduł porównujący identyfikatory między raportami
 ├── reporter.py             # Generator raportów DOCX
+├── version.py              # Wersja projektu (v1.1.0)
 ├── requirements.txt        # Zależności Pythona
 ├── models/
 │   └── schemas.py          # Modele danych i funkcje pomocnicze ekstrakcji
 └── parsers/
     ├── __init__.py         # Eksport parserów
     ├── binance_parser.py   # Parser raportów Binance (.xlsx)
-    └── htx_parser.py       # Parser raportów HTX (placeholder)
+    └── htx_parser.py       # Parser raportów HTX (.xlsx)
 ```
 
 ---
@@ -88,11 +89,18 @@ python main.py -v
 - **Access Logs / Approved Devices** – logi IP, urządzenia, geolokalizacja
 - **Order History** – historia zleceń
 
+### Parsowane arkusze (HTX)
+- **register_1** – dane rejestracyjne / KYC HTX:
+  - UID użytkownika, imię i nazwisko, e-mail, telefon
+  - Numer dokumentu (idcard), kraj rejestracji, data utworzenia konta
+  - **Adres portfela (user_address)** — wykazywany per UID w raporcie
+  - Dane płatnicze: bankcard, alipay, wechat
+
 ### Ekstrahowane identyfikatory
 - ID użytkownika (właściciel i powiązani)
 - E-maile, numery telefonów
 - Adresy IP, geolokalizacje, przeglądarki
-- Adresy portfeli kryptowalutowych
+- **Adresy portfeli kryptowalutowych (per UID dla HTX)**
 - TXID (hash transakcji blockchain)
 - BIN karty, ostatnie 4 cyfry, IBAN, numery kont
 - ID urządzeń, zamówień, kontrahentów
@@ -113,13 +121,13 @@ python main.py -v
 - Spis treści
 - Podsumowanie wszystkich plików (tabela)
 - Szczegółowa analiza każdego raportu:
-  - Dane KYC i basic info
+  - Dane KYC i basic info (w tym HTX Register)
   - Salda walutowe z podziałem na portfele
   - Logi Spot/Funding/Deposit/Withdrawal z podsumowaniem przepływów per waluta
   - **Pełny bilans łączony** — suma ze wszystkich źródeł z porównaniem do Assets Overview
   - Wykrywanie ujemnych sald i transakcji pending
 - Porównanie między raportami
-- Pełna lista identyfikatorów
+- Pełna lista identyfikatorów (w tym **adresy portfeli per UID** dla HTX)
 
 ---
 
@@ -138,7 +146,7 @@ python main.py [-h] [-o OUTPUT] [-r REPORT] [--no-docx] [-v]
 
 ## 📝 Uwagi
 
-- Parser **HTX** jest obecnie w fazie placeholdera – wymaga dostarczenia przykładowego pliku `.xlsx` do implementacji.
+- Parser **HTX** obsługuje obecnie arkusz **register_1** (dane rejestracyjne / KYC). Kolejne arkusze HTX będą dodawane iteracyjnie.
 - Transakcje oznaczone jako *pending* / *processing* / *initiated* są pomijane w podsumowaniu przepływów, ale widoczne w logach.
 - Status **"Completed"** w Deposit/Withdrawal History jest traktowany jako potwierdzony (nie pending).
 - Obrazki z arkusza **KYC Documents** są zapisywane do `output/images/`.

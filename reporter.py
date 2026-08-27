@@ -23,6 +23,7 @@ SECTION_TRANSLATIONS = {
     "EDD Info": "EDD Info (Informacje EDD – Rozszerzona due diligence)",
     "Payment Merchant Info": "Payment Merchant Info (Informacje o sprzedawcy)",
     "Sub-accounts": "Sub-accounts (Subkonta)",
+    "HTX Register": "HTX Register (Rejestracja HTX)",
 }
 
 BASIC_INFO_ORDER = [
@@ -281,6 +282,15 @@ class ReportGenerator:
             self._add_heading(display_name, level=4)
             if sec_name == "Basic Information":
                 rows = self._sort_basic_info(data)
+            elif sec_name == "HTX Register":
+                # HTX Register ma strukturę: {uid: {col: val, ...}}
+                rows = []
+                for uid_key, row_data in data.items():
+                    for col, val in row_data.items():
+                        if val is not None and str(val).strip() != "":
+                            rows.append([str(col), str(val)])
+                        else:
+                            rows.append([str(col), "(puste)"])
             else:
                 rows = []
                 for col, val in data.items():
@@ -658,6 +668,8 @@ class ReportGenerator:
                     self._render_kyc(r)
                 elif sheet_name == "Assets Overview":
                     self._render_assets_overview(r)
+                elif sheet_name == "register_1":
+                    self._render_customer_info(r)
 
             # Nowa sekcja transakcyjna — per waluta, wszystkie źródła razem
             self._render_currency_flows(r)
@@ -708,6 +720,14 @@ class ReportGenerator:
                 self._add_paragraph(f"ID powiązanych użytkowników ({len(r.related_user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.related_user_ids))]
                 self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
+
+            # --- HTX: adresy portfeli per UID ---
+            if r.wallet_addresses_by_user:
+                self._add_paragraph(f"Adresy portfeli powiązane z UID ({len(r.wallet_addresses_by_user)} użytkowników):", bold=True)
+                wallet_rows = []
+                for uid_val, addrs in sorted(r.wallet_addresses_by_user.items()):
+                    wallet_rows.append([str(uid_val), ", ".join(sorted(addrs))])
+                self._add_table(["UID", "Adresy portfeli"], wallet_rows, max_rows=50)
 
             id_sections = [
                 ("E-maile", r.emails), ("Numery telefonów", r.phones),

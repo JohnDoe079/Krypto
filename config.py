@@ -20,7 +20,9 @@ BINANCE_SHEETS = {
     "Approved Devices": "approved_devices",
 }
 
-HTX_SHEETS = {}
+HTX_SHEETS = {
+    "register_1": "register_1",
+}
 
 DATA_DIRS = {
     "binance": "data/binance",

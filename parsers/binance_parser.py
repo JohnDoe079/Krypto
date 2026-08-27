@@ -27,12 +27,9 @@ def _fmt_num(val) -> str:
     Obcina nieznaczące zera z końca, nawet jeśli źródło (Excel) je zawiera."""
     if val is None or val == "":
         return ""
-    # Ścieżka string-first: jeśli val wygląda na liczbę z kropką/przecinkiem,
-    # obcinamy zera bez konwersji na float (unikamy artefaktów precyzji float).
     s_raw = str(val).strip().replace(" ", "").replace("\n", "").replace("\r", "")
     s = _normalize_decimal(s_raw)
 
-    # Notacja naukowa (np. 9.09e-06 z numpy float64) — przejdź przez float
     if 'e' in s.lower():
         try:
             f = float(s)
@@ -54,7 +51,6 @@ def _fmt_num(val) -> str:
             return s
         except (ValueError, TypeError):
             pass
-    # Klasyczna ścieżka float (dla numpy, Decimal, int itp.)
     try:
         f = float(val)
         if abs(f) < 1e-12:
@@ -117,10 +113,8 @@ class BinanceReportParser:
 
         self._dedup_phones()
 
-        # Sprawdź czy w transakcjach fiat są inne User ID (może być zasilenie z innego konta)
         all_fiat = self.identifiers.fiat_deposit_transactions + self.identifiers.fiat_trade_transactions
         foreign_user_ids = set()
-        # Wszystkie znane ID (właściciel + powiązane + z innych arkuszy)
         known_ids = self.identifiers.user_ids | self.identifiers.related_user_ids
         for t in all_fiat:
             if t.user_id and t.user_id not in known_ids:
@@ -202,15 +196,11 @@ class BinanceReportParser:
                         if ni < len(df) and nj < len(df.columns):
                             btc_val = clean_val(df.iloc[ni, nj])
                             if btc_val and not _is_zero(btc_val):
-                                # Komórka może zawierać BTC + USD w jednym stringu
-                                # (np. "0.00106313000000\n≈$68.0288594586000000").
-                                # Wyciągamy obie liczby: pierwsza = BTC, druga = USD.
                                 raw_str = str(btc_val).replace("\n", " ").replace("\r", " ").strip()
                                 tokens = raw_str.split()
                                 btc_str = ""
                                 usd_str = ""
                                 for token in tokens:
-                                    # Wyciągnij pierwszą liczbę z tokena (ignoruj znaki walutowe: $ € £ ¥ ≈)
                                     m = re.search(r'[\d\.,]+', token)
                                     if m:
                                         num = m.group()
@@ -311,21 +301,8 @@ class BinanceReportParser:
 
     def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
         self._parse_asset_log(df, "Funding", sheet_name)
-    def _parse_spot_asset_log(self, df: pd.DataFrame, sheet_name: str):
-        """Proxy do _parse_asset_log dla Spot."""
-        self._parse_asset_log(df, "Spot", sheet_name)
-
-    def _parse_funding_asset_log(self, df: pd.DataFrame, sheet_name: str):
-        """Proxy do _parse_asset_log dla Funding."""
-        self._parse_asset_log(df, "Funding", sheet_name)
 
     def _parse_asset_log(self, df: pd.DataFrame, wallet_type: str, sheet_name: str):
-        """Parsuje Spot Asset Log lub Funding Asset Log z grupowaniem po Transaction ID.
-
-        Binance zapisuje jedną transakcję spot jako wiele wierszy (np. 3 wiersze:
-        fee w BTC, zapłata w PLN, kupno BTC). Grupujemy je po Transaction ID,
-        aby prawidłowo rozliczyć bilans i nie pominąć żadnego wiersza.
-        """
         cols = [str(c).strip().lower() for c in df.columns]
         col_map = {}
         for idx, c in enumerate(cols):
@@ -359,7 +336,6 @@ class BinanceReportParser:
         print(f"  Kolumny Asset Log ({wallet_type}): {list(col_map.keys())}")
         print(f"  Wszystkie kolumny w arkuszu: {list(df.columns)}")
 
-        # --- Faza 1: Zbierz wszystkie wiersze do listy dict ---
         raw_rows = []
         for _, row in df.iterrows():
             r = {}
@@ -368,22 +344,18 @@ class BinanceReportParser:
                 r[key] = val
             raw_rows.append(r)
 
-        # --- Faza 2: Grupuj po Transaction ID ---
         from collections import defaultdict
         groups = defaultdict(list)
         for r in raw_rows:
             txid = str(r.get("transaction_id", "")).strip() if r.get("transaction_id") else ""
             groups[txid].append(r)
 
-        # --- Faza 3: Przetwórz każdą grupę ---
         for txid, rows in groups.items():
             for r in rows:
-                # change = Amount (zawiera znak +/-)
                 chg_val = r.get("change")
                 if chg_val is None:
                     chg_val = r.get("amount")
 
-                # reason = Type + " | " + Description (oryginalne opisy z Excela, bez tłumaczeń)
                 reason_parts = []
                 if r.get("reason"):
                     reason_parts.append(str(r["reason"]))
@@ -411,7 +383,6 @@ class BinanceReportParser:
                     else:
                         self.identifiers.funding_transactions.append(txn)
 
-                # Ekstrakcja identyfikatorów
                 if r.get("user_id"):
                     self._add_related_user_id(r["user_id"])
                 if r.get("order_id"):
@@ -422,7 +393,6 @@ class BinanceReportParser:
         count = len(self.identifiers.spot_transactions) if wallet_type == "Spot" else len(self.identifiers.funding_transactions)
         print(f"  Sparsowano {count} transakcji {wallet_type}")
 
-        # Dodaj Transaction IDs do zbioru
         if "Transaction ID" in df.columns:
             for v in df["Transaction ID"].dropna():
                 v = clean_val(v)
@@ -466,14 +436,12 @@ class BinanceReportParser:
 
         self.identifiers.customer_info_sections = sections
 
-        # === Wykryj User ID właściciela explicite z Basic Information ===
         for section_name, data in sections.items():
             if "basic" in section_name.lower() or "customer" in section_name.lower():
                 for col, val in data.items():
                     if val is None or val == "":
                         continue
                     col_lower = str(col).lower().strip()
-                    # Szukaj explicite kolumny User ID
                     if col_lower in ["user id", "userid", "user_id", "uid", "binance id", "binanceid"]:
                         v_norm = self._normalize_user_id(val)
                         if v_norm:
@@ -500,8 +468,6 @@ class BinanceReportParser:
                     self.identifiers.ips.add(v)
                     continue
 
-                # NIE szukamy User ID w innych sekcjach — właściciel jest TYLKO w Basic Information
-
                 if re.match(r"^[A-Z]{1,2}\d{6,10}$", v):
                     self.identifiers.id_numbers.add(v)
                     continue
@@ -511,14 +477,12 @@ class BinanceReportParser:
                     continue
 
     def _format_card_number(self, card_bin: str, card_last4: str) -> Optional[str]:
-        """Formatuje numer karty: BIN + last4 → 5355 57** **** 3305."""
         if not card_bin or not card_last4:
             return None
         bin_clean = str(card_bin).strip().replace(" ", "")
         last4_clean = str(card_last4).strip().replace(" ", "")
         if not bin_clean.isdigit() or not last4_clean.isdigit():
             return None
-        # Standardowy format: pierwsze 4 cyfry, potem 2 z BIN, potem ** **, potem last4
         if len(bin_clean) >= 6:
             return f"{bin_clean[:4]} {bin_clean[4:6]}** **** {last4_clean}"
         elif len(bin_clean) >= 4:
@@ -526,21 +490,17 @@ class BinanceReportParser:
         return f"**** **** **** {last4_clean}"
 
     def _add_related_user_id(self, val):
-        """Dodaje User ID do related_user_ids, ale tylko jeśli nie jest właścicielem konta."""
         v_norm = self._normalize_user_id(val)
         if v_norm and v_norm not in self.identifiers.user_ids:
             self.identifiers.related_user_ids.add(v_norm)
 
     def _normalize_user_id(self, val) -> Optional[str]:
-        """Normalizuje User ID — usuwa .0 z float, spacje, cudzysłowy."""
         if val is None or val == "":
             return None
         v = str(val).strip().lstrip("'").rstrip("'")
-        # Usuń .0 z float (np. 394533241.0 → 394533241)
         if v.endswith(".0"):
             v = v[:-2]
         v = v.replace(" ", "").replace(",", "")
-        # User ID Binance: 6-12 cyfr
         if re.match(r"^\d{6,12}$", v):
             return v
         return None
@@ -770,7 +730,6 @@ class BinanceReportParser:
         fail_count = 0
         success_count = 0
 
-        # --- Ekstrakcja identyfikatorów ---
         for col, target in [
             ("Card Bin", self.identifiers.card_bins),
             ("Card Last 4 Digital", self.identifiers.card_last4),
@@ -783,15 +742,12 @@ class BinanceReportParser:
                     if v:
                         target.add(v)
 
-        # Sformatowane karty: Card Bin + Card Last 4 Digital
         if "Card Bin" in df.columns and "Card Last 4 Digital" in df.columns:
             for _, row in df.iterrows():
                 card_bin = clean_val(row.get("Card Bin"))
                 card_last4 = clean_val(row.get("Card Last 4 Digital"))
                 txn_method = str(clean_val(row.get("Transaction Method"))).lower() if "Transaction Method" in df.columns else ""
                 if card_bin and card_last4:
-                    # Format: 535557 + 3305 → 5355 57** **** 3305
-                    # BIN to zazwyczaj 6 cyfr, ale może być 4-8
                     if len(card_bin) >= 4:
                         formatted = self._format_card_number(card_bin, card_last4)
                         if formatted:
@@ -811,18 +767,15 @@ class BinanceReportParser:
                 if v:
                     self._add_related_user_id(v)
 
-        # --- Parsowanie transakcji (ruchy środków) ---
         for _, row in df.iterrows():
             status_raw = str(clean_val(row.get("Status Name"))).strip() if "Status Name" in df.columns else ""
             status = status_raw.lower()
 
-            # Zliczanie statusów
             if status == "fail" or "fail" in status:
                 fail_count += 1
-                continue  # FAIL nie wliczamy do bilansu
+                continue
             elif status in ["success", "completed", "filled", "confirmed"]:
                 success_count += 1
-            # Puste lub inne — parsujemy ostrożnie
 
             time_str = str(clean_val(row.get("Order Create Time"))) if "Order Create Time" in df.columns else ""
             fiat_curr = str(clean_val(row.get("Currency"))) if "Currency" in df.columns else ""
@@ -835,7 +788,6 @@ class BinanceReportParser:
             user_id = str(clean_val(row.get("User Id"))) if "User Id" in df.columns else ""
             order_id = str(clean_val(row.get("Order Id"))) if "Order Id" in df.columns else ""
 
-            # Rozchód fiat (użytkownik płaci)
             if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
                 txn_fiat = AssetTransaction(
                     time=time_str,
@@ -850,7 +802,6 @@ class BinanceReportParser:
                 )
                 self.identifiers.fiat_deposit_transactions.append(txn_fiat)
 
-            # Przychód krypto (otrzymane)
             if crypto_curr and crypto_amt and not _is_zero(crypto_amt):
                 txn_crypto = AssetTransaction(
                     time=time_str,
@@ -875,7 +826,6 @@ class BinanceReportParser:
         fail_count = 0
         success_count = 0
 
-        # --- Ekstrakcja identyfikatorów ---
         if "User Email" in df.columns:
             for v in df["User Email"].dropna():
                 email = extract_email(v)
@@ -892,7 +842,6 @@ class BinanceReportParser:
                 if v:
                     self._add_related_user_id(v)
 
-        # --- Parsowanie transakcji (ruchy środków) ---
         for _, row in df.iterrows():
             status = str(clean_val(row.get("Status Name"))).lower() if "Status Name" in df.columns else ""
             if status and status not in ["completed", "success", "filled", "confirmed", ""]:
@@ -908,7 +857,6 @@ class BinanceReportParser:
             if not crypto_amt:
                 crypto_amt = clean_val(row.get("Crypto Amount")) if "Crypto Amount" in df.columns else None
 
-            # Domyślnie traktuj jako BUY jeśli nieznany Business Type
             is_buy = business_type in ["BUY", ""] or "BUY" in business_type
             is_sell = business_type == "SELL" or "SELL" in business_type
 
@@ -916,7 +864,6 @@ class BinanceReportParser:
             order_id = str(clean_val(row.get("Order Id"))) if "Order Id" in df.columns else ""
 
             if is_buy:
-                # Rozchód fiat, przychód krypto
                 if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
                     txn_fiat = AssetTransaction(
                         time=time_str,
@@ -945,7 +892,6 @@ class BinanceReportParser:
                     self.identifiers.fiat_trade_transactions.append(txn_crypto)
 
             elif is_sell:
-                # Przychód fiat, rozchód krypto
                 if fiat_curr and fiat_amt and not _is_zero(fiat_amt):
                     txn_fiat = AssetTransaction(
                         time=time_str,
@@ -1035,7 +981,6 @@ class BinanceReportParser:
             elif "time" in c or "date" in c:
                 col_map["time"] = idx
 
-        # Extract IDs
         if "order_id" in col_map:
             for v in df.iloc[:, col_map["order_id"]].dropna():
                 v = clean_val(v)
@@ -1047,7 +992,6 @@ class BinanceReportParser:
                 if v:
                     self._add_related_user_id(v)
 
-        # Parse transactions
         if "base_asset" in col_map and "base_qty" in col_map:
             for _, row in df.iterrows():
                 base = str(clean_val(row.iloc[col_map["base_asset"]])) if "base_asset" in col_map else ""
@@ -1061,7 +1005,6 @@ class BinanceReportParser:
                 if not base or not base_qty:
                     continue
 
-                # Base asset: SELL = -, BUY = +
                 if side == "SELL":
                     base_chg = f"-{base_qty}"
                 elif side == "BUY":
@@ -1080,7 +1023,6 @@ class BinanceReportParser:
                 )
                 self.identifiers.spot_transactions.append(txn_base)
 
-                # Quote asset: SELL = + (receive quote), BUY = - (pay quote)
                 if quote and quote_qty:
                     if side == "SELL":
                         quote_chg = f"+{quote_qty}"
