@@ -1,4 +1,4 @@
-# Krypto v1.4.11
+# Krypto v1.4.12
 
 **Parser i komparator raportów giełdowych kryptowalutowych**
 

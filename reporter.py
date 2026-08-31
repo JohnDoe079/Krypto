@@ -290,7 +290,6 @@ class ReportGenerator:
             user_data = htx_data[uid]
             if uid.startswith("row_"):
                 # Brak UID — pokaż jako anonimowy wiersz
-                self._add_paragraph("")
                 self._add_heading(f"Wiersz bez UID ({uid})", level=4)
                 rows = [[k, v, "register_1"] for k, v in user_data.items()]
                 self._add_table(["Pole", "Wartość", "Źródło"], rows, max_rows=50)
@@ -359,7 +358,7 @@ class ReportGenerator:
         self._add_paragraph("")
         wallets = r.wallet_addresses_by_user.get(uid, [])
         if wallets:
-            self._add_paragraph("Adresy portfeli kryptowalutowych:", bold=True)
+            self._add_heading("Adresy portfeli kryptowalutowych:", level=4)
             wallet_rows = [[str(i+1), addr, "register_1"] for i, addr in enumerate(sorted(wallets))]
             self._add_table(["Lp.", "Adres portfela", "Źródło"], wallet_rows, max_rows=20)
         else:
@@ -405,7 +404,8 @@ class ReportGenerator:
                 ip_records[ip].append(rec.get("time", ""))
 
         if ip_records:
-            self._add_paragraph("Unikalne adresy IP z zakresem czasowym:", bold=True)
+            self._add_paragraph("")
+            self._add_heading("Unikalne adresy IP z zakresem czasowym:", level=4)
             ip_rows = []
             for ip, times in sorted(ip_records.items()):
                 valid_times = [t for t in times if t]
@@ -434,12 +434,12 @@ class ReportGenerator:
         total_size = sum(os.path.getsize(p) for p in photos if os.path.exists(p))
         if total_size > 5 * 1024 * 1024:
             self._add_paragraph("")
-            self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)} plików, {total_size/1024/1024:.1f} MB — za duże do osadzenia w raporcie):", bold=True)
+            self._add_heading(f"Zdjęcia certyfikowane ({len(photos)} plików, {total_size/1024/1024:.1f} MB — za duże do osadzenia w raporcie):", level=4)
             rows = [[str(i+1), os.path.basename(p), p, "certified_photos"] for i, p in enumerate(photos)]
             self._add_table(["Lp.", "Nazwa pliku", "Ścieżka", "Źródło"], rows, max_rows=20)
             return
 
-        self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)}):", bold=True)
+        self._add_heading(f"Zdjęcia certyfikowane ({len(photos)}):", level=4)
         # Tabela z zdjęciami — max 3 kolumny
         n_cols = min(3, len(photos))
         n_rows = (len(photos) + n_cols - 1) // n_cols
@@ -967,7 +967,7 @@ class ReportGenerator:
             if r.exchange == "htx":
                 # Tylko zdjęcia certyfikowane (bo są tylko tu, per UID ze ścieżkami)
                 if r.certified_photos:
-                    self._add_paragraph(f"Zdjęcia certyfikowane ({sum(len(v) for v in r.certified_photos.values())} zdjęć):", bold=True)
+                    self._add_heading(f"Zdjęcia certyfikowane ({sum(len(v) for v in r.certified_photos.values())} zdjęć):", level=4)
                     photo_rows = []
                     for uid_val, paths in sorted(r.certified_photos.items()):
                         for p in paths:
@@ -979,12 +979,12 @@ class ReportGenerator:
             # Dla Binance: pełna lista identyfikatorów (jak poprzednio)
             if r.user_ids:
                 self._add_paragraph("")
-                self._add_paragraph(f"ID właściciela konta ({len(r.user_ids)}):", bold=True)
+                self._add_heading(f"ID właściciela konta ({len(r.user_ids)}):", level=4)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.user_ids))]
                 self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
             if r.related_user_ids:
                 self._add_paragraph("")
-                self._add_paragraph(f"ID powiązanych użytkowników ({len(r.related_user_ids)}):", bold=True)
+                self._add_heading(f"ID powiązanych użytkowników ({len(r.related_user_ids)}):", level=4)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.related_user_ids))]
                 self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
 
@@ -1005,7 +1005,7 @@ class ReportGenerator:
             for title, items in id_sections:
                 if items:
                     self._add_paragraph("")
-                    self._add_paragraph(f"{title} ({len(items)}):", bold=True)
+                    self._add_heading(f"{title} ({len(items)}):", level=4)
                     rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(items))]
                     self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
 
@@ -1095,8 +1095,7 @@ class ReportGenerator:
                 self._add_paragraph(f"Zakres czasowy: {tr['from']} → {tr['to']}")
         # IP
         if r.ips:
-            self._add_paragraph("")
-            self._add_paragraph(f"Unikalne adresy IP ({len(r.ips)}):", bold=True)
+            self._add_heading(f"Unikalne adresy IP ({len(r.ips)}):", level=4)
             rows = [[str(i+1), ip, "login_1"] for i, ip in enumerate(sorted(r.ips)[:50])]
             self._add_table(["Lp.", "Adres IP", "Źródło"], rows, max_rows=50)
             if len(r.ips) > 50:
@@ -1104,7 +1103,7 @@ class ReportGenerator:
         # Geolokalizacje
         if r.geolocations:
             self._add_paragraph("")
-            self._add_paragraph(f"Lokalizacje ({len(r.geolocations)}):", bold=True)
+            self._add_heading(f"Lokalizacje ({len(r.geolocations)}):", level=4)
             rows = [[str(i+1), loc, "login_1"] for i, loc in enumerate(sorted(r.geolocations)[:50])]
             self._add_table(["Lp.", "Lokalizacja", "Źródło"], rows, max_rows=50)
             if len(r.geolocations) > 50:
@@ -1112,7 +1111,7 @@ class ReportGenerator:
         # Przeglądarki
         if r.browsers:
             self._add_paragraph("")
-            self._add_paragraph(f"Przeglądarki / User Agent ({len(r.browsers)}):", bold=True)
+            self._add_heading(f"Przeglądarki / User Agent ({len(r.browsers)}):", level=4)
             rows = [[str(i+1), br, "login_1"] for i, br in enumerate(sorted(r.browsers)[:50])]
             self._add_table(["Lp.", "Przeglądarka", "Źródło"], rows, max_rows=50)
             if len(r.browsers) > 50:

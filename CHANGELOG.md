@@ -4,10 +4,18 @@ Wszystkie istotne zmiany w projekcie Krypto.
 
 ---
 
+## [1.4.12] – 2026-08-31
+
+### Poprawiono (formatowanie DOCX)
+- **Odstęp przed "Unikalne adresy IP z zakresem czasowym:"** — dodano pusty akapit przed nagłówkiem, aby był odstęp od poprzedniej tabeli "Historia logowania". Nagłówek i tabela unikalnych IP pozostają razem (bez odstępu między nimi).
+- Zasada globalna: nagłówek sekcji/tabeli ma być bezpośrednio nad tabelą (bez odstępu), ale ma być odstęp od poprzedniej treści/tabeli.
+
+---
+
 ## [1.4.11] – 2026-08-31
 
 ### Poprawiono (formatowanie DOCX)
-- **Usunięto odstęp przed "Unikalne adresy IP z zakresem czasowym:"** — nagłówek jest teraz bezpośrednio nad tabelą unikalnych IP, bez pustego wiersza między nimi.
+- **Usunięto odstęp przed "Unikalne adresy IP z zakresem czasowym:"** — nagłówek jest teraz bezpośrednio nad tabelą.
 
 ---
 
