@@ -1,8 +1,8 @@
-# Krypto v1.4.7
+# Krypto v1.4.8
 
 **Parser i komparator raportów giełdowych kryptowalutowych**
 
-Automatyczne skanowanie, parsowanie i analiza raportów użytkownika z giełd **Binance** oraz **HTX** (Huobi) w formacie `.xlsx`. Narzędzie ekstrahuje identyfikatory, salda, transakcje i generuje szczegółowy raport porównawczy w formacie DOCX oraz JSON.
+Automatyczne skanowanie, parsowanie i analiza raportów użytkownika z giełd **Binance** oraz **HTX** (Huobi) w formacie `.xlsx`. Narzędzie ekstrahuje identyfikatory, salda, transakcje, logowania i generuje szczegółowy raport porównawczy w formacie DOCX oraz JSON.
 
 ---
 
@@ -14,7 +14,7 @@ Krypto/
 ├── config.py               # Konfiguracja arkuszy i katalogów danych
 ├── matcher.py              # Moduł porównujący identyfikatory między raportami
 ├── reporter.py             # Generator raportów DOCX
-├── version.py              # Wersja projektu (v1.4.7)
+├── version.py              # Wersja projektu (v1.4.8)
 ├── requirements.txt        # Zależności Pythona
 ├── CHANGELOG.md            # Historia zmian
 ├── models/
@@ -94,17 +94,22 @@ python main.py -v
 - **register_1** – dane rejestracyjne / KYC HTX:
   - UID użytkownika, imię i nazwisko, e-mail, telefon
   - Numer dokumentu (idcard), kraj rejestracji, data utworzenia konta
-  - **Adres portfela (user_address)** — wykazywany per UID w raporcie
+  - Adres portfela (user_address) — wykazywany per UID w raporcie
   - Dane płatnicze: bankcard, alipay, wechat
 - **balance_1** – salda walutowe per UID:
   - Waluta i saldo w jednej komórce (po enterach)
   - Źródło arkusza oznaczone w kolumnie "Źródło"
+- **login_1** – historia logowań per UID:
+  - Parsowanie kolumn: `uid`, `login_time`, `login_terminal`, `ip`
+  - Wyświetlanie szczegółowej tabeli logowań (max 50 wierszy)
+  - Unikalne adresy IP z zakresem czasowym (pierwsze/ostatnie logowanie)
+  - Wykrywanie IP współdzielonych między użytkownikami w sekcji porównań
 
 ### Ekstrahowane identyfikatory
 - ID użytkownika (właściciel i powiązani)
 - E-maile, numery telefonów
 - Adresy IP, geolokalizacje, przeglądarki
-- **Adresy portfeli kryptowalutowych (per UID dla HTX)**
+- Adresy portfeli kryptowalutowych (per UID dla HTX)
 - TXID (hash transakcji blockchain)
 - BIN karty, ostatnie 4 cyfry, IBAN, numery kont
 - ID urządzeń, zamówień, kontrahentów
@@ -119,6 +124,7 @@ python main.py -v
 - Automatyczne wykrywanie **wspólnych identyfikatorów** między raportami (potencjalne powiązania)
 - Lista **unikalnych identyfikatorów** per plik
 - Kontekst czasowy dla wspólnych danych
+- **Współdzielone adresy IP (HTX)** — osobna tabelka pokazująca IP używane przez więcej niż jednego użytkownika, wraz z plikiem źródłowym, UID i zakresem czasowym
 
 ### Raport DOCX
 - Strona tytułowa
@@ -126,12 +132,13 @@ python main.py -v
 - Podsumowanie wszystkich plików (tabela z kolumną Źródło dla HTX)
 - Szczegółowa analiza każdego raportu:
   - Dane KYC i basic info (w tym HTX Register z saldami szczegółowymi)
+  - **Historia logowań HTX** — szczegółowa tabela + unikalne IP z zakresem czasowym
   - Salda walutowe z podziałem na portfele
   - Logi Spot/Funding/Deposit/Withdrawal z podsumowaniem przepływów per waluta
-  - **Pełny bilans łączony** — suma ze wszystkich źródeł z porównaniem do Assets Overview
+  - Pełny bilans łączony — suma ze wszystkich źródeł z porównaniem do Assets Overview
   - Wykrywanie ujemnych sald i transakcji pending
-- Porównanie między raportami
-- Pełna lista identyfikatorów (w tym **adresy portfeli per UID** dla HTX)
+- Porównanie między raportami (w tym współdzielone IP HTX)
+- Pełna lista identyfikatorów (w tym adresy portfeli per UID dla HTX)
 
 ---
 
@@ -150,11 +157,12 @@ python main.py [-h] [-o OUTPUT] [-r REPORT] [--no-docx] [-v]
 
 ## 📝 Uwagi
 
-- Parser **HTX** obsługuje arkusze **register_1** (dane rejestracyjne / KYC) oraz **balance_1** (salda walutowe). Kolejne arkusze HTX będą dodawane iteracyjnie.
+- Parser **HTX** obsługuje arkusze **register_1** (dane rejestracyjne / KYC), **balance_1** (salda walutowe) oraz **login_1** (historia logowań). Kolejne arkusze HTX będą dodawane iteracyjnie.
 - Transakcje oznaczone jako *pending* / *processing* / *initiated* są pomijane w podsumowaniu przepływów, ale widoczne w logach.
 - Status **"Completed"** w Deposit/Withdrawal History jest traktowany jako potwierdzony (nie pending).
 - Obrazki z arkusza **KYC Documents** są zapisywane do `output/images/`.
 - Różnica między pełnym bilansem przepływów a saldem z **Assets Overview** może wynikać z transferów między portfelami (Spot ↔ Funding) lub środków w innych produktach (Futures, Earn, Margin, Pool).
+- **Anonimizacja**: kod nie zawiera żadnych danych przetwarzanych poza nagłówkami kolumn. Paczka ZIP nie zawiera plików cache (`__pycache__`) ani danych wejściowych.
 
 ---
 

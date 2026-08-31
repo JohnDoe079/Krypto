@@ -11,6 +11,7 @@ from models.schemas import (
     extract_email,
     extract_phone,
     is_wallet_address,
+    is_valid_ip,
 )
 from config import HTX_SHEETS
 
@@ -77,11 +78,16 @@ class HTXReportParser:
             print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
             self._parse_balance_1(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
+        elif sheet_name == "login_1":
+            df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=0, engine="openpyxl")
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
+            self._parse_login_1(df, sheet_name)
+            self.identifiers.parsed_sheets.append(sheet_name)
         else:
-            # Pozostałe arkusze (trade_*, login_1, DeviceFP_1, balance_1, deposit&withdraw...)
+            # Pozostałe arkusze (trade_*, DeviceFP_1, deposit&withdraw...)
             # Tylko generyczne skanowanie pierwszych 100 wierszy w poszukiwaniu portfeli/ID
             # NIE ładujemy wszystkich wierszy do pamięci
-            print(f"  [ARKUSZ] '{sheet_name}' — pominięty (tylko register_1 jest parsowany)")
+            print(f"  [ARKUSZ] '{sheet_name}' — pominięty (tylko register_1, balance_1, login_1 są parsowane)")
             self.identifiers.unknown_sheets.append(sheet_name)
 
     def _detect_columns(self, df: pd.DataFrame, mapping: dict) -> dict:
@@ -120,6 +126,59 @@ class HTXReportParser:
                     self._htx_balances[uid] = []
                 self._htx_balances[uid].append({"currency": str(curr), "balance": str(bal)})
         print(f"  Sparsowano balance_1: {len(df)} wierszy")
+
+    def _parse_login_1(self, df: pd.DataFrame, sheet_name: str):
+        """Parsuje arkusz login_1 — logowania per UID.
+        Kolumny: uid, login_time, login_terminal, ip
+        """
+        col_map = self._detect_columns(df, {
+            "uid": ["uid", "user_id", "userid"],
+            "login_time": ["login_time", "time", "date", "timestamp"],
+            "login_terminal": ["login_terminal", "terminal", "device", "platform"],
+            "ip": ["ip", "ip_address", "address"],
+        })
+        print(f"  [DEBUG login_1] Kolumny w arkuszu: {list(df.columns)}")
+        print(f"  [DEBUG login_1] Wykryte kolumny: {list(col_map.keys())}")
+
+        if not col_map:
+            print(f"  [DEBUG login_1] NIE wykryto kolumn — pominięto!")
+            return
+
+        for _, row in df.iterrows():
+            uid = self._clean_htx_val(row.iloc[col_map["uid"]]) if "uid" in col_map else None
+            login_time = self._clean_htx_val(row.iloc[col_map["login_time"]]) if "login_time" in col_map else None
+            terminal = self._clean_htx_val(row.iloc[col_map["login_terminal"]]) if "login_terminal" in col_map else None
+            ip = self._clean_htx_val(row.iloc[col_map["ip"]]) if "ip" in col_map else None
+
+            if uid:
+                if uid not in self.identifiers.login_records:
+                    self.identifiers.login_records[uid] = []
+                record = {}
+                if login_time:
+                    record["time"] = str(login_time)
+                    # Dodaj do time_ranges per arkusz
+                    if sheet_name not in self.identifiers.time_ranges:
+                        self.identifiers.time_ranges[sheet_name] = {"from": str(login_time), "to": str(login_time)}
+                    else:
+                        # Aktualizuj zakres
+                        current_from = self.identifiers.time_ranges[sheet_name]["from"]
+                        current_to = self.identifiers.time_ranges[sheet_name]["to"]
+                        if str(login_time) < current_from:
+                            self.identifiers.time_ranges[sheet_name]["from"] = str(login_time)
+                        if str(login_time) > current_to:
+                            self.identifiers.time_ranges[sheet_name]["to"] = str(login_time)
+                if terminal:
+                    record["terminal"] = str(terminal)
+                if ip:
+                    record["ip"] = str(ip)
+                    if is_valid_ip(str(ip)):
+                        self.identifiers.ips.add(str(ip))
+
+                if record:
+                    self.identifiers.login_records[uid].append(record)
+
+        total_records = sum(len(v) for v in self.identifiers.login_records.values())
+        print(f"  Sparsowano login_1: {len(df)} wierszy, {total_records} rekordów logowania")
 
     def _merge_balances_into_register(self):
         """Dołącza salda z balance_1 do profilu użytkownika w customer_info_sections.

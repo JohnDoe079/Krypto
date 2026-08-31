@@ -11,7 +11,7 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
 
-from models.schemas import ExtractedIdentifiers, AssetTransaction, _normalize_decimal
+from models.schemas import ExtractedIdentifiers, AssetTransaction, _normalize_decimal, is_valid_ip
 from matcher import ReportComparator
 
 SECTION_TRANSLATIONS = {
@@ -347,7 +347,10 @@ class ReportGenerator:
         if profile_rows:
             self._add_table(["Pole", "Wartość", "Źródło"], profile_rows, max_rows=50)
 
-        # --- 2. ZDJĘCIA CERTYFIKOWANE ---
+        # --- 2. LOGOWANIA ---
+        self._render_htx_logins_for_user(r, uid)
+
+        # --- 3. ZDJĘCIA CERTYFIKOWANE ---
         self._render_htx_photos(r, uid)
 
         # --- 3. TABELA PORTFELI (osobna, na końcu) ---
@@ -360,6 +363,59 @@ class ReportGenerator:
             self._add_paragraph("Brak przypisanych adresów portfeli.", color=RGBColor(0x80, 0x80, 0x80))
 
         self._add_paragraph("")  # odstęp między użytkownikami
+
+    def _render_htx_logins_for_user(self, r: ExtractedIdentifiers, uid: str):
+        """Renderuje logowania HTX dla konkretnego UID.
+
+        Pokazuje:
+        - Tabelkę logowań (max 50 wierszy): Czas, Terminal, IP, Źródło
+        - Unikalne IP z zakresem czasowym (min/max daty) per IP
+        """
+        records = r.login_records.get(uid, [])
+        if not records:
+            return
+
+        self._add_heading(f"Historia logowania", level=4)
+
+        # --- Tabela szczegółowa logowań (max 50) ---
+        login_rows = []
+        for rec in records[:50]:
+            login_rows.append([
+                rec.get("time", ""),
+                rec.get("terminal", ""),
+                rec.get("ip", ""),
+                "login_1",
+            ])
+        self._add_table(["Czas logowania", "Terminal", "Adres IP", "Źródło"], login_rows, max_rows=50)
+        if len(records) > 50:
+            self._add_paragraph(
+                f"... i {len(records) - 50} więcej logowań (pełna lista w JSON).",
+                color=RGBColor(0x80, 0x80, 0x80))
+
+        # --- Tabela unikalnych IP z zakresem czasowym ---
+        from collections import defaultdict
+        ip_records = defaultdict(list)
+        for rec in records:
+            ip = rec.get("ip", "")
+            if ip:
+                ip_records[ip].append(rec.get("time", ""))
+
+        if ip_records:
+            self._add_paragraph("Unikalne adresy IP z zakresem czasowym:", bold=True)
+            ip_rows = []
+            for ip, times in sorted(ip_records.items()):
+                valid_times = [t for t in times if t]
+                if valid_times:
+                    time_from = min(valid_times)
+                    time_to = max(valid_times)
+                    ip_rows.append([ip, str(len(times)), time_from, time_to, "login_1"])
+                else:
+                    ip_rows.append([ip, str(len(times)), "(brak daty)", "(brak daty)", "login_1"])
+            self._add_table(
+                ["Adres IP", "Liczba logowań", "Pierwsze logowanie", "Ostatnie logowanie", "Źródło"],
+                ip_rows, max_rows=50)
+
+        self._add_paragraph("")
 
     def _render_htx_photos(self, r: ExtractedIdentifiers, uid: str):
         """Renderuje zdjęcia certyfikowane dla danego UID w tabeli.
@@ -890,6 +946,10 @@ class ReportGenerator:
                     self._add_table(["Lp.", "Wartość", "Pliki", "Zakres czasowy"], rows, max_rows=30)
             else:
                 self._add_paragraph("Nie znaleziono wspólnych identyfikatorów między raportami.")
+
+            # --- WSPÓLNE IP MIĘDZY KONTAMI HTX ---
+            self._render_shared_ips_comparison(reports)
+
             self.doc.add_page_break()
 
         # ===== 4. PEŁNA LISTA IDENTYFIKATORÓW =====
@@ -943,6 +1003,73 @@ class ReportGenerator:
                     self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
 
         self.doc.save(self.output_path)
+
+    def _render_shared_ips_comparison(self, reports: List[ExtractedIdentifiers]):
+        """Wykrywa i wyświetla adresy IP współdzielone między kontami HTX.
+
+        Jeśli ten sam IP występuje w logowaniach więcej niż jednego użytkownika
+        (w tym samym lub różnym raporcie), generuje osobną tabelkę ostrzegawczą.
+        """
+        # Zbierz wszystkie IP per (raport, uid)
+        ip_to_users: Dict[str, List[Dict]] = {}
+        for r in reports:
+            if r.exchange != "htx":
+                continue
+            for uid, records in r.login_records.items():
+                for rec in records:
+                    ip = rec.get("ip", "").strip()
+                    if not ip or not is_valid_ip(ip):
+                        continue
+                    if ip not in ip_to_users:
+                        ip_to_users[ip] = []
+                    # Sprawdź czy ten (raport, uid) już jest
+                    existing = [e for e in ip_to_users[ip] if e["file"] == r.source_file and e["uid"] == uid]
+                    if not existing:
+                        ip_to_users[ip].append({
+                            "file": r.source_file,
+                            "uid": uid,
+                            "times": [rec.get("time", "")],
+                        })
+                    else:
+                        existing[0]["times"].append(rec.get("time", ""))
+
+        # Filtruj tylko IP używane przez >1 użytkownika (w tym samym lub innym raporcie)
+        shared_ips = {ip: entries for ip, entries in ip_to_users.items() if len(entries) > 1}
+        if not shared_ips:
+            return
+
+        self._add_heading("Współdzielone adresy IP (HTX)", level=3)
+        self._add_paragraph(
+            "Poniższe adresy IP występują w logowaniach więcej niż jednego użytkownika. "
+            "Może to oznaczać współdzielone urządzenie, sieć VPN/proxy, lub powiązanie między kontami.",
+            color=RGBColor(0xC0, 0x00, 0x00))
+
+        rows = []
+        for ip, entries in sorted(shared_ips.items()):
+            # Zbuduj listę użytkowników per plik
+            users_per_file: Dict[str, List[str]] = {}
+            for e in entries:
+                if e["file"] not in users_per_file:
+                    users_per_file[e["file"]] = []
+                users_per_file[e["file"]].append(e["uid"])
+
+            user_strs = []
+            for fname, uids in users_per_file.items():
+                user_strs.append(f"{fname}: {', '.join(sorted(set(uids)))}")
+
+            # Zakres czasowy dla tego IP
+            all_times = []
+            for e in entries:
+                all_times.extend([t for t in e["times"] if t])
+            time_range = ""
+            if all_times:
+                time_range = f"{min(all_times)} → {max(all_times)}"
+
+            rows.append([ip, "; ".join(user_strs), time_range])
+
+        self._add_table(
+            ["Adres IP", "Użytkownicy (plik: UID)", "Zakres czasowy"],
+            rows, max_rows=50)
 
     # ========================================================================
     # HTX: NOWE SEKCJE — Logowania, Urządzenia, Transakcje

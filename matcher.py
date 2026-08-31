@@ -72,7 +72,45 @@ class ReportComparator:
                     key = f"{r.source_file}__{field_name}"
                     result["unique_per_file"][key] = sorted(unique)
 
+        # Dodatkowe porównanie: wspólne IP z login_records HTX (per UID)
+        self._compare_htx_login_ips(result)
+
         return result
+
+    def _compare_htx_login_ips(self, result: Dict[str, Any]):
+        """Wykrywa IP współdzielone między użytkownikami HTX w ramach porównywanych raportów."""
+        ip_to_users: Dict[str, List[Dict]] = {}
+        for r in self.reports:
+            if r.exchange != "htx":
+                continue
+            for uid, records in r.login_records.items():
+                for rec in records:
+                    ip = rec.get("ip", "").strip()
+                    if not ip:
+                        continue
+                    if ip not in ip_to_users:
+                        ip_to_users[ip] = []
+                    # Unikalny wpis per (plik, uid)
+                    existing = [e for e in ip_to_users[ip] if e["file"] == r.source_file and e["uid"] == uid]
+                    if not existing:
+                        ip_to_users[ip].append({
+                            "file": r.source_file,
+                            "uid": uid,
+                        })
+
+        shared = {ip: entries for ip, entries in ip_to_users.items() if len(entries) > 1}
+        if shared:
+            result["htx_shared_login_ips"] = {}
+            for ip, entries in sorted(shared.items()):
+                users_per_file = {}
+                for e in entries:
+                    if e["file"] not in users_per_file:
+                        users_per_file[e["file"]] = []
+                    users_per_file[e["file"]].append(e["uid"])
+                result["htx_shared_login_ips"][ip] = {
+                    "users_per_file": users_per_file,
+                    "total_users": len(entries),
+                }
 
     def print_comparison(self):
         result = self.compare()
@@ -97,6 +135,16 @@ class ReportComparator:
                                 print(f"   • {r}")
         else:
             print("\n✅ Nie znaleziono wspólnych identyfikatorów.")
+
+        # Wspólne IP z login_records HTX
+        shared_ips = result.get("htx_shared_login_ips", {})
+        if shared_ips:
+            print("\n🔴 WSPÓLNE ADRESY IP W LOGOWANIACH HTX:")
+            print("-" * 70)
+            for ip, data in shared_ips.items():
+                print(f"\n IP: {ip} — używane przez {data['total_users']} użytkowników:")
+                for fname, uids in data["users_per_file"].items():
+                    print(f"   • {fname}: UID {', '.join(sorted(set(uids)))}")
 
         unique = result.get("unique_per_file", {})
         if unique:

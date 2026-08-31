@@ -23,6 +23,7 @@ BINANCE_SHEETS = {
 HTX_SHEETS = {
     "register_1": "register_1",
     "balance_1": "balance_1",
+    "login_1": "login_1",
 }
 
 DATA_DIRS = {
