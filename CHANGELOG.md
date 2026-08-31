@@ -4,14 +4,24 @@ Wszystkie istotne zmiany w projekcie Krypto.
 
 ---
 
+## [1.4.11] – 2026-08-31
+
+### Poprawiono (formatowanie DOCX)
+- **Usunięto odstęp przed "Unikalne adresy IP z zakresem czasowym:"** — nagłówek jest teraz bezpośrednio nad tabelą unikalnych IP, bez pustego wiersza między nimi.
+
+---
+
+## [1.4.10] – 2026-08-31
+
+### Poprawiono (formatowanie DOCX)
+- **Odstępy przed wszystkimi nagłówkami tabel** — dodano pusty akapit przed każdym nagłówkiem sekcji/tabeli w raporcie DOCX.
+
+---
+
 ## [1.4.9] – 2026-08-31
 
 ### Poprawiono (formatowanie DOCX)
-- **Odstępy przed nagłówkami tabel** — dodano pusty akapit przed sekcjami:
-  - "Adresy portfeli kryptowalutowych:" (po zdjęciach certyfikowanych)
-  - "Unikalne adresy IP z zakresem czasowym:" (po tabeli szczegółowej logowań)
-- **Usunięto zbędny enter** między nagłówkiem "Zdjęcia certyfikowane" a tabelą zdjęć — nagłówek i tabela są teraz bezpośrednio po sobie.
-- Zasada stosowana globalnie: przed każdym nagłówkiem sekcji/tabeli jest odstęp od poprzedniej treści, ale nie ma pustego akapitu między nagłówkiem a właściwą tabelą.
+- **Odstępy przed nagłówkami tabel** — dodano pusty akapit przed sekcjami portfeli i unikalnych IP.
 
 ---
 
@@ -19,17 +29,15 @@ Wszystkie istotne zmiany w projekcie Krypto.
 
 ### Dodano (HTX)
 - **Obsługa arkusza `login_1`** — historia logowań per UID.
-- **Wyświetlanie logowań w profilu użytkownika HTX** — szczegółowa tabela + unikalne IP z zakresem czasowym.
-- **Wykrywanie współdzielonych IP** w sekcji porównań (sekcja 3 raportu DOCX).
+- **Wykrywanie współdzielonych IP** w sekcji porównań.
 
 ---
 
 ## [1.4.7] – 2026-08-31
 
 ### Zmieniono (HTX / Reporter)
-- **Salda szczegółowe w jednej komórce** — zamiast rozbijania sald `balance_1` na osobne wiersze.
+- **Salda szczegółowe w jednej komórce**.
 - **Kolumna "Źródło" we wszystkich tabelach HTX**.
-- **Usunięto zduplikowaną definicję** `_render_htx_logins()`.
 
 ---
 

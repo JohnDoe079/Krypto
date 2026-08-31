@@ -282,6 +282,7 @@ class ReportGenerator:
             self._add_paragraph("Brak danych rejestracyjnych HTX.")
             return
 
+        self._add_paragraph("")
         self._add_heading("Profil użytkownika HTX", level=3)
 
         # Dla każdego UID wygeneruj kartę profilu
@@ -289,6 +290,7 @@ class ReportGenerator:
             user_data = htx_data[uid]
             if uid.startswith("row_"):
                 # Brak UID — pokaż jako anonimowy wiersz
+                self._add_paragraph("")
                 self._add_heading(f"Wiersz bez UID ({uid})", level=4)
                 rows = [[k, v, "register_1"] for k, v in user_data.items()]
                 self._add_table(["Pole", "Wartość", "Źródło"], rows, max_rows=50)
@@ -376,6 +378,7 @@ class ReportGenerator:
         if not records:
             return
 
+        self._add_paragraph("")
         self._add_heading(f"Historia logowania", level=4)
 
         # --- Tabela szczegółowa logowań (max 50) ---
@@ -402,7 +405,6 @@ class ReportGenerator:
                 ip_records[ip].append(rec.get("time", ""))
 
         if ip_records:
-            self._add_paragraph("")
             self._add_paragraph("Unikalne adresy IP z zakresem czasowym:", bold=True)
             ip_rows = []
             for ip, times in sorted(ip_records.items()):
@@ -431,6 +433,7 @@ class ReportGenerator:
         # Sprawdź rozmiary — jeśli suma >5MB, pokaż tylko listę
         total_size = sum(os.path.getsize(p) for p in photos if os.path.exists(p))
         if total_size > 5 * 1024 * 1024:
+            self._add_paragraph("")
             self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)} plików, {total_size/1024/1024:.1f} MB — za duże do osadzenia w raporcie):", bold=True)
             rows = [[str(i+1), os.path.basename(p), p, "certified_photos"] for i, p in enumerate(photos)]
             self._add_table(["Lp.", "Nazwa pliku", "Ścieżka", "Źródło"], rows, max_rows=20)
@@ -975,10 +978,12 @@ class ReportGenerator:
 
             # Dla Binance: pełna lista identyfikatorów (jak poprzednio)
             if r.user_ids:
+                self._add_paragraph("")
                 self._add_paragraph(f"ID właściciela konta ({len(r.user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.user_ids))]
                 self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
             if r.related_user_ids:
+                self._add_paragraph("")
                 self._add_paragraph(f"ID powiązanych użytkowników ({len(r.related_user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.related_user_ids))]
                 self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
@@ -999,6 +1004,7 @@ class ReportGenerator:
             ]
             for title, items in id_sections:
                 if items:
+                    self._add_paragraph("")
                     self._add_paragraph(f"{title} ({len(items)}):", bold=True)
                     rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(items))]
                     self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
@@ -1089,6 +1095,7 @@ class ReportGenerator:
                 self._add_paragraph(f"Zakres czasowy: {tr['from']} → {tr['to']}")
         # IP
         if r.ips:
+            self._add_paragraph("")
             self._add_paragraph(f"Unikalne adresy IP ({len(r.ips)}):", bold=True)
             rows = [[str(i+1), ip, "login_1"] for i, ip in enumerate(sorted(r.ips)[:50])]
             self._add_table(["Lp.", "Adres IP", "Źródło"], rows, max_rows=50)
@@ -1096,6 +1103,7 @@ class ReportGenerator:
                 self._add_paragraph(f"... i {len(r.ips)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
         # Geolokalizacje
         if r.geolocations:
+            self._add_paragraph("")
             self._add_paragraph(f"Lokalizacje ({len(r.geolocations)}):", bold=True)
             rows = [[str(i+1), loc, "login_1"] for i, loc in enumerate(sorted(r.geolocations)[:50])]
             self._add_table(["Lp.", "Lokalizacja", "Źródło"], rows, max_rows=50)
@@ -1103,6 +1111,7 @@ class ReportGenerator:
                 self._add_paragraph(f"... i {len(r.geolocations)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
         # Przeglądarki
         if r.browsers:
+            self._add_paragraph("")
             self._add_paragraph(f"Przeglądarki / User Agent ({len(r.browsers)}):", bold=True)
             rows = [[str(i+1), br, "login_1"] for i, br in enumerate(sorted(r.browsers)[:50])]
             self._add_table(["Lp.", "Przeglądarka", "Źródło"], rows, max_rows=50)
@@ -1147,6 +1156,7 @@ class ReportGenerator:
 
         # Deposit — max 50
         if r.deposit_transactions:
+            self._add_paragraph("")
             self._add_heading("Depozyty (pierwsze 50)", level=4)
             rows = []
             for t in sorted(r.deposit_transactions, key=lambda x: x.time or "")[:50]:
@@ -1164,6 +1174,7 @@ class ReportGenerator:
 
         # Withdrawal — max 50
         if r.withdrawal_transactions:
+            self._add_paragraph("")
             self._add_heading("Wypłaty (pierwsze 50)", level=4)
             rows = []
             for t in sorted(r.withdrawal_transactions, key=lambda x: x.time or "")[:50]:
@@ -1181,6 +1192,7 @@ class ReportGenerator:
 
         # Spot/Trade — max 50
         if r.spot_transactions:
+            self._add_paragraph("")
             self._add_heading("Trade/Spot (pierwsze 50)", level=4)
             rows = []
             for t in sorted(r.spot_transactions, key=lambda x: x.time or "")[:50]:
@@ -1211,6 +1223,7 @@ class ReportGenerator:
             elif chg < 0: per_curr[curr]["out"] += abs(chg)
 
         if per_curr:
+            self._add_paragraph("")
             self._add_heading("Bilans per waluta", level=4)
             rows = []
             for curr, data in sorted(per_curr.items()):
