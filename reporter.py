@@ -296,15 +296,12 @@ class ReportGenerator:
 
             self._render_htx_user_card(r, uid, user_data)
 
-        # Portfele (globalna sekcja, jeśli nie była w karcie)
-        self._render_htx_wallets(r)
-
-        # Transakcje (jeśli dostępne)
-        self._render_currency_flows(r)
+        # Portfele i transakcje wyświetlane są per użytkownik w _render_htx_user_card
 
     def _render_htx_user_card(self, r: ExtractedIdentifiers, uid: str, user_data: Dict[str, str]):
         """Renderuje kartę pojedynczego użytkownika HTX: dane → zdjęcia → portfele."""
         self._add_heading(f"Użytkownik HTX — UID: {uid}", level=4)
+        print(f"    [DOCX] UID {uid}: dane={len(user_data)} pól, zdjęcia={len(r.certified_photos.get(uid,[]))}, portfele={len(r.wallet_addresses_by_user.get(uid,[]))}")
 
         # --- 1. TABELA DANYCH OSOBOWYCH ---
         field_labels = {
@@ -340,6 +337,14 @@ class ReportGenerator:
                 continue
             label = field_labels.get(field_key, field_key)
             profile_rows.append([label, _fmt_val(val)])
+
+        # Salda szczegółowe z balance_1 — osobne wiersze per waluta
+        if "balances_list" in user_data:
+            bal_items = user_data["balances_list"].split(" | ")
+            for item in bal_items:
+                if ":" in item:
+                    curr, val = item.split(":", 1)
+                    profile_rows.append([f"Saldo {curr.strip()}", val.strip()])
 
         if profile_rows:
             self._add_table(["Pole", "Wartość"], profile_rows, max_rows=50)
@@ -839,17 +844,9 @@ class ReportGenerator:
                     bold=True, color=RGBColor(0x00, 0x40, 0x80))
             self._add_paragraph("")
 
-            # ===== HTX: NOWA STRUKTURA RAPORTU =====
+            # ===== HTX: PROFIL UŻYTKOWNIKA =====
             if r.exchange == "htx":
-                print(f"    [DOCX] Profil użytkownika...")
                 self._render_htx_profile(r)
-                print(f"    [DOCX] Logowania...")
-                self._render_htx_logins(r)
-                print(f"    [DOCX] Urządzenia...")
-                self._render_htx_devices(r)
-                print(f"    [DOCX] Transakcje...")
-                self._render_htx_transactions(r)
-                print(f"    [DOCX] OK")
             else:
                 # Binance: klasyczna struktura
                 for sheet_name in r.parsed_sheets:
@@ -903,6 +900,21 @@ class ReportGenerator:
 
         for r in reports:
             self._add_heading(f"{r.source_file}", level=2)
+
+            # Dla HTX: sekcja 4 zawiera tylko dane NIEprezentowane w sekcji 2.4
+            if r.exchange == "htx":
+                # Tylko zdjęcia certyfikowane (bo są tylko tu, per UID ze ścieżkami)
+                if r.certified_photos:
+                    self._add_paragraph(f"Zdjęcia certyfikowane ({sum(len(v) for v in r.certified_photos.values())} zdjęć):", bold=True)
+                    photo_rows = []
+                    for uid_val, paths in sorted(r.certified_photos.items()):
+                        for p in paths:
+                            photo_rows.append([str(uid_val), os.path.basename(p), p])
+                    self._add_table(["UID", "Nazwa pliku", "Ścieżka"], photo_rows, max_rows=50)
+                # Pozostałe dane (imiona, emaile, portfele) są już w sekcji 2.4 — pomijamy
+                continue
+
+            # Dla Binance: pełna lista identyfikatorów (jak poprzednio)
             if r.user_ids:
                 self._add_paragraph(f"ID właściciela konta ({len(r.user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.user_ids))]
@@ -911,23 +923,6 @@ class ReportGenerator:
                 self._add_paragraph(f"ID powiązanych użytkowników ({len(r.related_user_ids)}):", bold=True)
                 rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(r.related_user_ids))]
                 self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
-
-            # --- HTX: adresy portfeli per UID ---
-            if r.wallet_addresses_by_user:
-                self._add_paragraph(f"Adresy portfeli powiązane z UID ({len(r.wallet_addresses_by_user)} użytkowników):", bold=True)
-                wallet_rows = []
-                for uid_val, addrs in sorted(r.wallet_addresses_by_user.items()):
-                    wallet_rows.append([str(uid_val), ", ".join(sorted(addrs))])
-                self._add_table(["UID", "Adresy portfeli"], wallet_rows, max_rows=50)
-
-            # --- HTX: zdjęcia certyfikowane per UID ---
-            if r.certified_photos:
-                self._add_paragraph(f"Zdjęcia certyfikowane ({sum(len(v) for v in r.certified_photos.values())} zdjęć):", bold=True)
-                photo_rows = []
-                for uid_val, paths in sorted(r.certified_photos.items()):
-                    for p in paths:
-                        photo_rows.append([str(uid_val), os.path.basename(p), p])
-                self._add_table(["UID", "Nazwa pliku", "Ścieżka"], photo_rows, max_rows=50)
 
             id_sections = [
                 ("E-maile", r.emails), ("Numery telefonów", r.phones),
@@ -953,6 +948,8 @@ class ReportGenerator:
     # ========================================================================
     # HTX: NOWE SEKCJE — Logowania, Urządzenia, Transakcje
     # ========================================================================
+
+        self.doc.save(self.output_path)
 
     def _render_htx_logins(self, r: ExtractedIdentifiers):
         """Renderuje logowania HTX w DOCX — max 50 wierszy."""
@@ -1149,4 +1146,3 @@ class ReportGenerator:
                 ])
             self._add_table(["Waluta", "Przychody", "Rozchody", "Netto", "Liczba trans."], rows, max_rows=50)
 
-        self.doc.save(self.output_path)

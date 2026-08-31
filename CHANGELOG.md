@@ -4,6 +4,51 @@ Wszystkie istotne zmiany w projekcie Krypto.
 
 ---
 
+## [1.4.1] – 2026-08-31 (hotfix)
+
+### Naprawiono
+- **Salda z `balance_1` nie były wyświetlane** — metoda `_parse_balance_1` istniała, ale nie była wywoływana w `_parse_sheet`. Dodano wywołanie, salda teraz poprawnie mergują się z profilem użytkownika.
+- **Uwaga o `__pycache__`** — folder `__pycache__` generuje się automatycznie przy pierwszym uruchomieniu Pythona, nie jest potrzebny w paczce ZIP.
+
+---
+
+## [1.4.1] – 2026-08-31
+
+### Naprawiono
+- **Brak salda z balance_1** — dodano printy debug w `_parse_balance_1` by zdiagnozować problem z wykrywaniem kolumn.
+- **Dublowanie danych HTX w sekcji 4** — dla HTX sekcja 4 zawiera teraz TYLKO zdjęcia certyfikowane. Imiona, emaile, portfele itp. pominięte (są już w sekcji 2.4).
+- **__pycache__ w ZIP** — wykluczono foldery `__pycache__` z paczki.
+
+---
+
+## [1.4.0] – 2026-08-31
+
+### Dodano (HTX)
+- **Parsowanie arkusza `balance_1`** — salda per waluta per UID.
+- **Salda wyświetlane w tabeli użytkownika** — po danych osobowych pojawia się wiersz "Salda szczegółowe (balance_1)" z listą wszystkich walut i ich sald (np. `htx: 13034.76 | dai: 0.000000005 | bnb: 0.028...`).
+- **Zachowano pole `balance` z `register_1`** — wyświetlane jako "Saldo (register_1)" — na razie oba pola są widoczne, potem zdecydujemy czy się dublować.
+
+---
+
+## [1.3.6] – 2026-08-31
+
+### Zmieniono (HTX / Reporter)
+- **Wyczyszczono raport DOCX dla HTX** — zostawiono TYLKO profil użytkownika:
+  1. Tabela danych osobowych (UID, data utworzenia, imię i nazwisko, email, telefon, numer dokumentu, kraj, saldo, itp.)
+  2. Zdjęcia certyfikowane (osadzone w tabeli lub lista jeśli za duże)
+  3. Osobna tabela z adresami portfeli
+- Usunięto puste sekcje logowania, urządzeń i transakcji (parser ich nie wczytuje, więc nie ma sensu ich wyświetlać).
+- Usunięto dublowanie tabeli portfeli (globalna sekcja + per użytkownik).
+
+---
+
+## [1.3.5] – 2026-08-27 (hotfix)
+
+### Naprawiono
+- **Błąd generowania DOCX** — `self.doc.save()` wylądował wewnątrz metody `_render_htx_transactions` zamiast na końcu `generate`, przez co plik DOCX nie był zapisywany. Przywrócono na właściwe miejsce.
+
+---
+
 ## [1.3.4] – 2026-08-27 (hotfix)
 
 ### Zmieniono (HTX)

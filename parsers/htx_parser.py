@@ -23,6 +23,7 @@ class HTXReportParser:
             source_file=self.file_path.name,
             exchange="htx"
         )
+        self._htx_balances = {}  # uid -> [{currency, balance}, ...]
 
     def _clean_htx_val(self, val):
         """Czyści wartość z HTX Excela — usuwa .0 z floatów i notację naukową."""
@@ -46,7 +47,10 @@ class HTXReportParser:
 
     def parse_all(self) -> ExtractedIdentifiers:
         all_sheets = self.xl.sheet_names
-        print(f"  Znaleziono {len(all_sheets)} arkuszy: {', '.join(all_sheets)}")
+        print(f"  Znaleziono {len(all_sheets)} arkuszy:")
+        for i, sn in enumerate(all_sheets, 1):
+            print(f"    {i}. [{repr(sn)}] (len={len(sn)})")
+        print(f"  Arkusze: {', '.join(all_sheets)}")
 
         for sheet_name in all_sheets:
             try:
@@ -57,6 +61,9 @@ class HTXReportParser:
         if self.identifiers.unknown_sheets:
             print(f"  [!] Nieznane arkusze (pominięte): {', '.join(self.identifiers.unknown_sheets)}")
 
+        # Dołącz salda z balance_1 do profilu użytkownika
+        self._merge_balances_into_register()
+
         return self.identifiers
 
     def _parse_sheet(self, sheet_name: str):
@@ -65,12 +72,82 @@ class HTXReportParser:
             print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
             self._parse_register_1(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
+        elif sheet_name == "balance_1":
+            df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=0, engine="openpyxl")
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
+            self._parse_balance_1(df, sheet_name)
+            self.identifiers.parsed_sheets.append(sheet_name)
         else:
             # Pozostałe arkusze (trade_*, login_1, DeviceFP_1, balance_1, deposit&withdraw...)
             # Tylko generyczne skanowanie pierwszych 100 wierszy w poszukiwaniu portfeli/ID
             # NIE ładujemy wszystkich wierszy do pamięci
             print(f"  [ARKUSZ] '{sheet_name}' — pominięty (tylko register_1 jest parsowany)")
             self.identifiers.unknown_sheets.append(sheet_name)
+
+    def _detect_columns(self, df: pd.DataFrame, mapping: dict) -> dict:
+        """Wykrywa indeksy kolumn na podstawie słownika {nazwa_wewnętrzna: [możliwe_nazwy]}."""
+        result = {}
+        cols_lower = [str(c).strip().lower().replace("-", "_").replace(" ", "_") for c in df.columns]
+        for internal_name, possible_names in mapping.items():
+            for idx, col_name in enumerate(cols_lower):
+                for possible in possible_names:
+                    if possible in col_name:
+                        result[internal_name] = idx
+                        break
+                if internal_name in result:
+                    break
+        return result
+
+    def _parse_balance_1(self, df: pd.DataFrame, sheet_name: str):
+        """Parsuje arkusz balance_1 — salda per waluta per UID."""
+        print(f"  [DEBUG balance_1] Kolumny w arkuszu: {list(df.columns)}")
+        col_map = self._detect_columns(df, {
+            "uid": ["uid", "user_id", "userid"],
+            "currency": ["currency", "coin", "asset", "symbol"],
+            "balance": ["balance", "total", "all", "amount"],
+        })
+        print(f"  [DEBUG balance_1] Wykryte kolumny: {list(col_map.keys())}")
+        if not col_map:
+            print(f"  [DEBUG balance_1] NIE wykryto kolumn — pominięto!")
+            return
+
+        for _, row in df.iterrows():
+            uid = self._clean_htx_val(row.iloc[col_map["uid"]]) if "uid" in col_map else None
+            curr = self._clean_htx_val(row.iloc[col_map["currency"]]) if "currency" in col_map else None
+            bal = self._clean_htx_val(row.iloc[col_map["balance"]]) if "balance" in col_map else None
+            if uid and curr and bal:
+                if uid not in self._htx_balances:
+                    self._htx_balances[uid] = []
+                self._htx_balances[uid].append({"currency": str(curr), "balance": str(bal)})
+        print(f"  Sparsowano balance_1: {len(df)} wierszy")
+
+    def _merge_balances_into_register(self):
+        """Dołącza salda z balance_1 do profilu użytkownika w customer_info_sections.
+        Salda są przechowywane jako lista {currency, balance} pod kluczem 'balances_list',
+        a reporter sam je rozbije na osobne wiersze.
+        """
+        if not self._htx_balances:
+            return
+        if "HTX Register" not in self.identifiers.customer_info_sections:
+            self.identifiers.customer_info_sections["HTX Register"] = {}
+
+        for uid, balances in self._htx_balances.items():
+            # Zbuduj czytelny string z sald (dla podsumowania w sekcji 4)
+            bal_items = []
+            for b in balances:
+                bal_items.append(f"{b['currency']}: {b['balance']}")
+            bal_str = " | ".join(bal_items)
+
+            if uid in self.identifiers.customer_info_sections["HTX Register"]:
+                # Nie dodawaj balances_detail (surowy string) — tylko lista
+                self.identifiers.customer_info_sections["HTX Register"][uid]["balances_list"] = bal_str
+            else:
+                # Jeśli UID z balance_1 nie ma w register_1, utwórz minimalny wpis
+                self.identifiers.customer_info_sections["HTX Register"][uid] = {
+                    "uid": uid,
+                    "balances_list": bal_str,
+                }
+            print(f"  [SALDA] UID {uid}: {len(balances)} walut")
 
     def _match_certified_photos(self):
         """Dopasowuje foldery ze zdjęciami do UID. Folder może być prefiksem UID (krótszy o 1+ znaków)."""
