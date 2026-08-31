@@ -354,6 +354,7 @@ class ReportGenerator:
         self._render_htx_photos(r, uid)
 
         # --- 3. TABELA PORTFELI (osobna, na końcu) ---
+        self._add_paragraph("")
         wallets = r.wallet_addresses_by_user.get(uid, [])
         if wallets:
             self._add_paragraph("Adresy portfeli kryptowalutowych:", bold=True)
@@ -401,6 +402,7 @@ class ReportGenerator:
                 ip_records[ip].append(rec.get("time", ""))
 
         if ip_records:
+            self._add_paragraph("")
             self._add_paragraph("Unikalne adresy IP z zakresem czasowym:", bold=True)
             ip_rows = []
             for ip, times in sorted(ip_records.items()):
@@ -435,7 +437,6 @@ class ReportGenerator:
             return
 
         self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)}):", bold=True)
-
         # Tabela z zdjęciami — max 3 kolumny
         n_cols = min(3, len(photos))
         n_rows = (len(photos) + n_cols - 1) // n_cols
