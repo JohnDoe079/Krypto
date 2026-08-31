@@ -1,4 +1,4 @@
-# Krypto v1.1.0
+# Krypto v1.4.7
 
 **Parser i komparator raportów giełdowych kryptowalutowych**
 
@@ -14,8 +14,9 @@ Krypto/
 ├── config.py               # Konfiguracja arkuszy i katalogów danych
 ├── matcher.py              # Moduł porównujący identyfikatory między raportami
 ├── reporter.py             # Generator raportów DOCX
-├── version.py              # Wersja projektu (v1.1.0)
+├── version.py              # Wersja projektu (v1.4.7)
 ├── requirements.txt        # Zależności Pythona
+├── CHANGELOG.md            # Historia zmian
 ├── models/
 │   └── schemas.py          # Modele danych i funkcje pomocnicze ekstrakcji
 └── parsers/
@@ -95,6 +96,9 @@ python main.py -v
   - Numer dokumentu (idcard), kraj rejestracji, data utworzenia konta
   - **Adres portfela (user_address)** — wykazywany per UID w raporcie
   - Dane płatnicze: bankcard, alipay, wechat
+- **balance_1** – salda walutowe per UID:
+  - Waluta i saldo w jednej komórce (po enterach)
+  - Źródło arkusza oznaczone w kolumnie "Źródło"
 
 ### Ekstrahowane identyfikatory
 - ID użytkownika (właściciel i powiązani)
@@ -119,9 +123,9 @@ python main.py -v
 ### Raport DOCX
 - Strona tytułowa
 - Spis treści
-- Podsumowanie wszystkich plików (tabela)
+- Podsumowanie wszystkich plików (tabela z kolumną Źródło dla HTX)
 - Szczegółowa analiza każdego raportu:
-  - Dane KYC i basic info (w tym HTX Register)
+  - Dane KYC i basic info (w tym HTX Register z saldami szczegółowymi)
   - Salda walutowe z podziałem na portfele
   - Logi Spot/Funding/Deposit/Withdrawal z podsumowaniem przepływów per waluta
   - **Pełny bilans łączony** — suma ze wszystkich źródeł z porównaniem do Assets Overview
@@ -146,7 +150,7 @@ python main.py [-h] [-o OUTPUT] [-r REPORT] [--no-docx] [-v]
 
 ## 📝 Uwagi
 
-- Parser **HTX** obsługuje obecnie arkusz **register_1** (dane rejestracyjne / KYC). Kolejne arkusze HTX będą dodawane iteracyjnie.
+- Parser **HTX** obsługuje arkusze **register_1** (dane rejestracyjne / KYC) oraz **balance_1** (salda walutowe). Kolejne arkusze HTX będą dodawane iteracyjnie.
 - Transakcje oznaczone jako *pending* / *processing* / *initiated* są pomijane w podsumowaniu przepływów, ale widoczne w logach.
 - Status **"Completed"** w Deposit/Withdrawal History jest traktowany jako potwierdzony (nie pending).
 - Obrazki z arkusza **KYC Documents** są zapisywane do `output/images/`.

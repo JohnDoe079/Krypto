@@ -290,8 +290,8 @@ class ReportGenerator:
             if uid.startswith("row_"):
                 # Brak UID — pokaż jako anonimowy wiersz
                 self._add_heading(f"Wiersz bez UID ({uid})", level=4)
-                rows = [[k, v] for k, v in user_data.items()]
-                self._add_table(["Pole", "Wartość"], rows, max_rows=50)
+                rows = [[k, v, "register_1"] for k, v in user_data.items()]
+                self._add_table(["Pole", "Wartość", "Źródło"], rows, max_rows=50)
                 continue
 
             self._render_htx_user_card(r, uid, user_data)
@@ -330,24 +330,22 @@ class ReportGenerator:
         for field_key in priority_fields:
             if field_key in user_data:
                 label = field_labels.get(field_key, field_key)
-                profile_rows.append([label, _fmt_val(user_data[field_key])])
+                profile_rows.append([label, _fmt_val(user_data[field_key]), "register_1"])
 
         for field_key, val in user_data.items():
-            if field_key in priority_fields or field_key == "user_address":
+            if field_key in priority_fields or field_key == "user_address" or field_key == "balances_list":
                 continue
             label = field_labels.get(field_key, field_key)
-            profile_rows.append([label, _fmt_val(val)])
+            profile_rows.append([label, _fmt_val(val), "register_1"])
 
-        # Salda szczegółowe z balance_1 — osobne wiersze per waluta
+        # Salda szczegółowe z balance_1 — w jednej komórce, po enterach
         if "balances_list" in user_data:
             bal_items = user_data["balances_list"].split(" | ")
-            for item in bal_items:
-                if ":" in item:
-                    curr, val = item.split(":", 1)
-                    profile_rows.append([f"Saldo {curr.strip()}", val.strip()])
+            bal_multiline = "\n".join(bal_items)
+            profile_rows.append(["Salda szczegółowe", bal_multiline, "balance_1"])
 
         if profile_rows:
-            self._add_table(["Pole", "Wartość"], profile_rows, max_rows=50)
+            self._add_table(["Pole", "Wartość", "Źródło"], profile_rows, max_rows=50)
 
         # --- 2. ZDJĘCIA CERTYFIKOWANE ---
         self._render_htx_photos(r, uid)
@@ -356,8 +354,8 @@ class ReportGenerator:
         wallets = r.wallet_addresses_by_user.get(uid, [])
         if wallets:
             self._add_paragraph("Adresy portfeli kryptowalutowych:", bold=True)
-            wallet_rows = [[str(i+1), addr] for i, addr in enumerate(sorted(wallets))]
-            self._add_table(["Lp.", "Adres portfela"], wallet_rows, max_rows=20)
+            wallet_rows = [[str(i+1), addr, "register_1"] for i, addr in enumerate(sorted(wallets))]
+            self._add_table(["Lp.", "Adres portfela", "Źródło"], wallet_rows, max_rows=20)
         else:
             self._add_paragraph("Brak przypisanych adresów portfeli.", color=RGBColor(0x80, 0x80, 0x80))
 
@@ -376,8 +374,8 @@ class ReportGenerator:
         total_size = sum(os.path.getsize(p) for p in photos if os.path.exists(p))
         if total_size > 5 * 1024 * 1024:
             self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)} plików, {total_size/1024/1024:.1f} MB — za duże do osadzenia w raporcie):", bold=True)
-            rows = [[str(i+1), os.path.basename(p), p] for i, p in enumerate(photos)]
-            self._add_table(["Lp.", "Nazwa pliku", "Ścieżka"], rows, max_rows=20)
+            rows = [[str(i+1), os.path.basename(p), p, "certified_photos"] for i, p in enumerate(photos)]
+            self._add_table(["Lp.", "Nazwa pliku", "Ścieżka", "Źródło"], rows, max_rows=20)
             return
 
         self._add_paragraph(f"Zdjęcia certyfikowane ({len(photos)}):", bold=True)
@@ -425,8 +423,8 @@ class ReportGenerator:
         self._add_heading("Portfele kryptowalutowe (podsumowanie)", level=3)
         rows = []
         for uid, addrs in sorted(r.wallet_addresses_by_user.items()):
-            rows.append([str(uid), ", ".join(sorted(addrs)), str(len(addrs))])
-        self._add_table(["UID", "Adresy portfeli", "Liczba"], rows, max_rows=50)
+            rows.append([str(uid), ", ".join(sorted(addrs)), str(len(addrs)), "register_1"])
+        self._add_table(["UID", "Adresy portfeli", "Liczba", "Źródło"], rows, max_rows=50)
 
     # ========================================================================
     # KONIEC HTX
@@ -944,13 +942,12 @@ class ReportGenerator:
                     rows = [[str(i+1), str(item)] for i, item in enumerate(sorted(items))]
                     self._add_table(["Lp.", "Wartość"], rows, max_rows=20)
 
+        self.doc.save(self.output_path)
 
     # ========================================================================
     # HTX: NOWE SEKCJE — Logowania, Urządzenia, Transakcje
     # ========================================================================
 
-        self.doc.save(self.output_path)
-
     def _render_htx_logins(self, r: ExtractedIdentifiers):
         """Renderuje logowania HTX w DOCX — max 50 wierszy."""
         login_sheets = [s for s in r.parsed_sheets if s == "login_1"]
@@ -965,22 +962,22 @@ class ReportGenerator:
         # IP
         if r.ips:
             self._add_paragraph(f"Unikalne adresy IP ({len(r.ips)}):", bold=True)
-            rows = [[str(i+1), ip] for i, ip in enumerate(sorted(r.ips)[:50])]
-            self._add_table(["Lp.", "Adres IP"], rows, max_rows=50)
+            rows = [[str(i+1), ip, "login_1"] for i, ip in enumerate(sorted(r.ips)[:50])]
+            self._add_table(["Lp.", "Adres IP", "Źródło"], rows, max_rows=50)
             if len(r.ips) > 50:
                 self._add_paragraph(f"... i {len(r.ips)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
         # Geolokalizacje
         if r.geolocations:
             self._add_paragraph(f"Lokalizacje ({len(r.geolocations)}):", bold=True)
-            rows = [[str(i+1), loc] for i, loc in enumerate(sorted(r.geolocations)[:50])]
-            self._add_table(["Lp.", "Lokalizacja"], rows, max_rows=50)
+            rows = [[str(i+1), loc, "login_1"] for i, loc in enumerate(sorted(r.geolocations)[:50])]
+            self._add_table(["Lp.", "Lokalizacja", "Źródło"], rows, max_rows=50)
             if len(r.geolocations) > 50:
                 self._add_paragraph(f"... i {len(r.geolocations)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
         # Przeglądarki
         if r.browsers:
             self._add_paragraph(f"Przeglądarki / User Agent ({len(r.browsers)}):", bold=True)
-            rows = [[str(i+1), br] for i, br in enumerate(sorted(r.browsers)[:50])]
-            self._add_table(["Lp.", "Przeglądarka"], rows, max_rows=50)
+            rows = [[str(i+1), br, "login_1"] for i, br in enumerate(sorted(r.browsers)[:50])]
+            self._add_table(["Lp.", "Przeglądarka", "Źródło"], rows, max_rows=50)
             if len(r.browsers) > 50:
                 self._add_paragraph(f"... i {len(r.browsers)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
 
@@ -992,56 +989,9 @@ class ReportGenerator:
         self._add_heading("Urządzenia zatwierdzone (skrót)", level=3)
         if r.device_ids:
             self._add_paragraph(f"Liczba unikalnych urządzeń / odcisków: {len(r.device_ids)}")
-            rows = [[str(i+1), dev[:80]] for i, dev in enumerate(sorted(r.device_ids)[:20])]
+            rows = [[str(i+1), dev[:80], "DeviceFP_1"] for i, dev in enumerate(sorted(r.device_ids)[:20])]
             if rows:
-                self._add_table(["Lp.", "ID urządzenia"], rows, max_rows=20)
-            if len(r.device_ids) > 20:
-                self._add_paragraph(f"... i {len(r.device_ids)-20} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
-
-    def _render_htx_logins(self, r: ExtractedIdentifiers):
-        """Renderuje logowania HTX w DOCX — max 50 wierszy."""
-        login_sheets = [s for s in r.parsed_sheets if s == "login_1"]
-        if not login_sheets and not r.ips and not r.geolocations and not r.browsers:
-            return
-        self._add_heading("Historia logowania", level=3)
-        # Zakres czasowy
-        for sheet_name in login_sheets:
-            if sheet_name in r.time_ranges:
-                tr = r.time_ranges[sheet_name]
-                self._add_paragraph(f"Zakres czasowy: {tr['from']} → {tr['to']}")
-        # IP
-        if r.ips:
-            self._add_paragraph(f"Unikalne adresy IP ({len(r.ips)}):", bold=True)
-            rows = [[str(i+1), ip] for i, ip in enumerate(sorted(r.ips)[:50])]
-            self._add_table(["Lp.", "Adres IP"], rows, max_rows=50)
-            if len(r.ips) > 50:
-                self._add_paragraph(f"... i {len(r.ips)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
-        # Geolokalizacje
-        if r.geolocations:
-            self._add_paragraph(f"Lokalizacje ({len(r.geolocations)}):", bold=True)
-            rows = [[str(i+1), loc] for i, loc in enumerate(sorted(r.geolocations)[:50])]
-            self._add_table(["Lp.", "Lokalizacja"], rows, max_rows=50)
-            if len(r.geolocations) > 50:
-                self._add_paragraph(f"... i {len(r.geolocations)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
-        # Przeglądarki
-        if r.browsers:
-            self._add_paragraph(f"Przeglądarki / User Agent ({len(r.browsers)}):", bold=True)
-            rows = [[str(i+1), br] for i, br in enumerate(sorted(r.browsers)[:50])]
-            self._add_table(["Lp.", "Przeglądarka"], rows, max_rows=50)
-            if len(r.browsers) > 50:
-                self._add_paragraph(f"... i {len(r.browsers)-50} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
-
-    def _render_htx_devices(self, r: ExtractedIdentifiers):
-        """Renderuje skrót urządzeń HTX (DeviceFP_1)."""
-        device_sheets = [s for s in r.parsed_sheets if s == "DeviceFP_1"]
-        if not device_sheets and not r.device_ids:
-            return
-        self._add_heading("Urządzenia zatwierdzone (skrót)", level=3)
-        if r.device_ids:
-            self._add_paragraph(f"Liczba unikalnych urządzeń / odcisków: {len(r.device_ids)}")
-            rows = [[str(i+1), dev[:80]] for i, dev in enumerate(sorted(r.device_ids)[:20])]
-            if rows:
-                self._add_table(["Lp.", "ID urządzenia"], rows, max_rows=20)
+                self._add_table(["Lp.", "ID urządzenia", "Źródło"], rows, max_rows=20)
             if len(r.device_ids) > 20:
                 self._add_paragraph(f"... i {len(r.device_ids)-20} więcej (pełna lista w JSON).", color=RGBColor(0x80, 0x80, 0x80))
 
@@ -1078,7 +1028,7 @@ class ReportGenerator:
                     t.change,
                     t.reason,
                     t.transaction_id[:20] if t.transaction_id else "—",
-                    t.source_sheet,
+                    t.source_sheet if t.source_sheet else "deposit&withdraw&transfer_1",
                 ])
             self._add_table(["Czas", "Waluta", "Zmiana", "Powód", "TxID", "Źródło"], rows, max_rows=50)
             if len(r.deposit_transactions) > 50:
@@ -1095,7 +1045,7 @@ class ReportGenerator:
                     t.change,
                     t.reason,
                     t.transaction_id[:20] if t.transaction_id else "—",
-                    t.source_sheet,
+                    t.source_sheet if t.source_sheet else "deposit&withdraw&transfer_1",
                 ])
             self._add_table(["Czas", "Waluta", "Zmiana", "Powód", "TxID", "Źródło"], rows, max_rows=50)
             if len(r.withdrawal_transactions) > 50:
@@ -1112,7 +1062,7 @@ class ReportGenerator:
                     t.change,
                     t.reason,
                     t.transaction_id[:20] if t.transaction_id else "—",
-                    t.source_sheet,
+                    t.source_sheet if t.source_sheet else "trade",
                 ])
             self._add_table(["Czas", "Waluta", "Zmiana", "Powód", "Order ID", "Źródło"], rows, max_rows=50)
             if len(r.spot_transactions) > 50:
@@ -1145,4 +1095,3 @@ class ReportGenerator:
                     str(data["count"]),
                 ])
             self._add_table(["Waluta", "Przychody", "Rozchody", "Netto", "Liczba trans."], rows, max_rows=50)
-
