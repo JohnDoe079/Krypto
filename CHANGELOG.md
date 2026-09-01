@@ -4,39 +4,54 @@ Wszystkie istotne zmiany w projekcie Krypto.
 
 ---
 
+## [1.4.13] – 2026-08-31
+
+### Dodano (HTX)
+- **Obsługa arkuszy `trade_*_1`** — transakcje handlowe HTX:
+  - Dynamiczne wykrywanie arkuszy: wzór `trade_*_1` (np. `trade_2024-04_1`, `trade_2024-05_1`)
+  - Parsowanie kolumn: `order_type`, `price`, `volume`, `amount`, `uid`, `order_id`, `created_time`, `symbol`, `order_side`
+  - Inteligentne rozpoznawanie par walutowych z `symbol` (np. `btcusdt` → base=BTC, quote=USDT)
+  - Znane quote currencies: USDT, USDC, BUSD, HUSD, BTC, ETH, TRX
+- **Wyświetlanie transakcji handlowych w profilu użytkownika HTX**:
+  - Tabela szczegółowa (max 50 wierszy): Czas, Symbol, Strona, Typ, Cena, Wolumen, Wartość, Order ID, Źródło
+  - Podsumowanie per waluta: Kupno/Sprzedaż/Netto (volume + amount), liczba transakcji
+  - Sortowanie po czasie
+
+---
+
 ## [1.4.12] – 2026-08-31
 
 ### Poprawiono (formatowanie DOCX)
-- **Odstęp przed "Unikalne adresy IP z zakresem czasowym:"** — dodano pusty akapit przed nagłówkiem, aby był odstęp od poprzedniej tabeli "Historia logowania". Nagłówek i tabela unikalnych IP pozostają razem (bez odstępu między nimi).
-- Zasada globalna: nagłówek sekcji/tabeli ma być bezpośrednio nad tabelą (bez odstępu), ale ma być odstęp od poprzedniej treści/tabeli.
+- **Ujednolicenie nagłówków tabel** — wszystkie nagłówki tabel zmienione z `_add_paragraph(..., bold=True)` na `_add_heading(..., level=4)`.
+- Nagłówek `level=4` ma wbudowany odstęp przed (`space_before`), dzięki czemu każda sekcja tabeli ma odstęp od poprzedniej treści, ale nagłówek jest bezpośrednio nad tabelą (bez pustego wiersza między).
 
 ---
 
 ## [1.4.11] – 2026-08-31
 
 ### Poprawiono (formatowanie DOCX)
-- **Usunięto odstęp przed "Unikalne adresy IP z zakresem czasowym:"** — nagłówek jest teraz bezpośrednio nad tabelą.
+- **Usunięto odstęp przed "Unikalne adresy IP z zakresem czasowym:"**.
 
 ---
 
 ## [1.4.10] – 2026-08-31
 
 ### Poprawiono (formatowanie DOCX)
-- **Odstępy przed wszystkimi nagłówkami tabel** — dodano pusty akapit przed każdym nagłówkiem sekcji/tabeli w raporcie DOCX.
+- **Odstępy przed wszystkimi nagłówkami tabel**.
 
 ---
 
 ## [1.4.9] – 2026-08-31
 
 ### Poprawiono (formatowanie DOCX)
-- **Odstępy przed nagłówkami tabel** — dodano pusty akapit przed sekcjami portfeli i unikalnych IP.
+- **Odstępy przed nagłówkami tabel**.
 
 ---
 
 ## [1.4.8] – 2026-08-31
 
 ### Dodano (HTX)
-- **Obsługa arkusza `login_1`** — historia logowań per UID.
+- **Obsługa arkusza `login_1`**.
 - **Wykrywanie współdzielonych IP** w sekcji porównań.
 
 ---

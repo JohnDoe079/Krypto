@@ -104,6 +104,9 @@ class ExtractedIdentifiers:
     # HTX: login records per UID {uid: [{time, terminal, ip}, ...]}
     login_records: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
 
+    # HTX: trade transactions per UID {uid: [{order_type, price, volume, amount, order_id, created_time, symbol, order_side, base_currency, quote_currency}, ...]}
+    htx_trade_transactions: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
+
     estimate_total_btc: str = ""
     estimate_total_usdt: str = ""
     asset_balances: List[AssetBalance] = field(default_factory=list)
@@ -160,6 +163,10 @@ class ExtractedIdentifiers:
                 uid: records
                 for uid, records in self.login_records.items()
             },
+            "htx_trade_transactions": {
+                uid: records
+                for uid, records in self.htx_trade_transactions.items()
+            },
             "estimate_total_btc": self.estimate_total_btc,
             "estimate_total_usdt": self.estimate_total_usdt,
             "asset_balances": [b.to_dict() for b in self.asset_balances],
@@ -205,6 +212,7 @@ class ExtractedIdentifiers:
             f"  Przeglądarki: {len(self.browsers)}",
             f"  Zdjęcia certyfikowane: {sum(len(v) for v in self.certified_photos.values())}",
             f"  Logowania (rekordy): {sum(len(v) for v in self.login_records.values())}",
+            f"  Transakcje handlowe HTX: {sum(len(v) for v in self.htx_trade_transactions.values())}",
             f"  Estimate Total BTC: {self.estimate_total_btc}",
             f"  Salda walut: {len(self.asset_balances)}",
             f"  Transakcje Spot: {len(self.spot_transactions)}",

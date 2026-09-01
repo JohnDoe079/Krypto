@@ -24,6 +24,7 @@ HTX_SHEETS = {
     "register_1": "register_1",
     "balance_1": "balance_1",
     "login_1": "login_1",
+    # Arkusze trade_*_1 są wykrywane dynamicznie (pattern matching)
 }
 
 DATA_DIRS = {

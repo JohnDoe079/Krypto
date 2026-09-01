@@ -351,7 +351,10 @@ class ReportGenerator:
         # --- 2. LOGOWANIA ---
         self._render_htx_logins_for_user(r, uid)
 
-        # --- 3. ZDJĘCIA CERTYFIKOWANE ---
+        # --- 3. TRANSAKCJE HANDLOWE ---
+        self._render_htx_trades_for_user(r, uid)
+
+        # --- 4. ZDJĘCIA CERTYFIKOWANE ---
         self._render_htx_photos(r, uid)
 
         # --- 3. TABELA PORTFELI (osobna, na końcu) ---
@@ -418,6 +421,97 @@ class ReportGenerator:
             self._add_table(
                 ["Adres IP", "Liczba logowań", "Pierwsze logowanie", "Ostatnie logowanie", "Źródło"],
                 ip_rows, max_rows=50)
+
+        self._add_paragraph("")
+
+    def _render_htx_trades_for_user(self, r: ExtractedIdentifiers, uid: str):
+        """Renderuje transakcje handlowe HTX dla konkretnego UID.
+
+        Pokazuje tabelę transakcji (max 50 wierszy) oraz podsumowanie per waluta.
+        """
+        trades = r.htx_trade_transactions.get(uid, [])
+        if not trades:
+            return
+
+        self._add_heading("Transakcje handlowe", level=4)
+
+        # Sortuj po czasie
+        sorted_trades = sorted(trades, key=lambda x: x.get("created_time", ""))
+
+        # Tabela szczegółowa (max 50)
+        trade_rows = []
+        for t in sorted_trades[:50]:
+            symbol_display = f"{t.get('base_currency', '')}/{t.get('quote_currency', '')}" if t.get('quote_currency') else t.get('symbol', '')
+            trade_rows.append([
+                t.get("created_time", ""),
+                symbol_display,
+                t.get("order_side", "").upper(),
+                t.get("order_type", ""),
+                t.get("price", ""),
+                t.get("volume", ""),
+                t.get("amount", ""),
+                t.get("order_id", ""),
+                t.get("source_sheet", ""),
+            ])
+        self._add_table(
+            ["Czas", "Symbol", "Strona", "Typ", "Cena", "Wolumen", "Wartość", "Order ID", "Źródło"],
+            trade_rows, max_rows=50)
+        if len(sorted_trades) > 50:
+            self._add_paragraph(
+                f"... i {len(sorted_trades) - 50} więcej transakcji (pełna lista w JSON).",
+                color=RGBColor(0x80, 0x80, 0x80))
+
+        # Podsumowanie per waluta (base + quote)
+        from collections import defaultdict
+        per_currency = defaultdict(lambda: {"buy_vol": 0.0, "sell_vol": 0.0, "buy_amount": 0.0, "sell_amount": 0.0, "count_buy": 0, "count_sell": 0})
+
+        for t in sorted_trades:
+            side = t.get("order_side", "").lower()
+            base_c = t.get("base_currency", "")
+            quote_c = t.get("quote_currency", "")
+
+            try:
+                vol = float(t.get("volume", "0") or "0")
+            except:
+                vol = 0.0
+            try:
+                amt = float(t.get("amount", "0") or "0")
+            except:
+                amt = 0.0
+
+            if base_c:
+                if side == "buy":
+                    per_currency[base_c]["buy_vol"] += vol
+                    per_currency[base_c]["count_buy"] += 1
+                elif side == "sell":
+                    per_currency[base_c]["sell_vol"] += vol
+                    per_currency[base_c]["count_sell"] += 1
+
+            if quote_c:
+                if side == "buy":
+                    per_currency[quote_c]["buy_amount"] += amt
+                elif side == "sell":
+                    per_currency[quote_c]["sell_amount"] += amt
+
+        if per_currency:
+            self._add_heading("Podsumowanie per waluta", level=4)
+            summary_rows = []
+            for curr, data in sorted(per_currency.items()):
+                net_vol = data["buy_vol"] - data["sell_vol"]
+                net_amt = data["buy_amount"] - data["sell_amount"]
+                summary_rows.append([
+                    curr,
+                    f"+{data['buy_vol']:.8f}".rstrip('0').rstrip('.') if data['buy_vol'] else "0",
+                    f"-{data['sell_vol']:.8f}".rstrip('0').rstrip('.') if data['sell_vol'] else "0",
+                    f"{net_vol:+.8f}".rstrip('0').rstrip('.'),
+                    f"+{data['buy_amount']:.8f}".rstrip('0').rstrip('.') if data['buy_amount'] else "0",
+                    f"-{data['sell_amount']:.8f}".rstrip('0').rstrip('.') if data['sell_amount'] else "0",
+                    f"{net_amt:+.8f}".rstrip('0').rstrip('.'),
+                    str(data["count_buy"] + data["count_sell"]),
+                ])
+            self._add_table(
+                ["Waluta", "Kupno (vol)", "Sprzedaż (vol)", "Netto (vol)", "Kupno (amt)", "Sprzedaż (amt)", "Netto (amt)", "Liczba trans."],
+                summary_rows, max_rows=50)
 
         self._add_paragraph("")
 

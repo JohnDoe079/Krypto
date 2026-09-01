@@ -1,4 +1,4 @@
-# Krypto v1.4.12
+# Krypto v1.4.13
 
 **Parser i komparator raportów giełdowych kryptowalutowych**
 
@@ -100,6 +100,15 @@ python main.py -v
   - Waluta i saldo w jednej komórce (po enterach)
   - Źródło arkusza oznaczone w kolumnie "Źródło"
 - **login_1** – historia logowań per UID:
+  - Parsowanie kolumn: `uid`, `login_time`, `login_terminal`, `ip`
+  - Wyświetlanie szczegółowej tabeli logowań (max 50 wierszy)
+  - Unikalne adresy IP z zakresem czasowym (pierwsze/ostatnie logowanie)
+  - Wykrywanie IP współdzielonych między użytkownikami w sekcji porównań
+- **trade_*_1** – transakcje handlowe per UID (dynamiczne wykrywanie arkuszy miesięcznych):
+  - Parsowanie kolumn: `order_type`, `price`, `volume`, `amount`, `uid`, `order_id`, `created_time`, `symbol`, `order_side`
+  - Inteligentne rozpoznawanie par walutowych (np. `btcusdt` → BTC/USDT)
+  - Wyświetlanie tabeli transakcji (max 50 wierszy) z podsumowaniem per waluta
+  - Sortowanie po czasie, kolumna Źródło z nazwą arkusza
   - Parsowanie kolumn: `uid`, `login_time`, `login_terminal`, `ip`
   - Wyświetlanie szczegółowej tabeli logowań (max 50 wierszy)
   - Unikalne adresy IP z zakresem czasowym (pierwsze/ostatnie logowanie)

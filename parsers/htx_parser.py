@@ -83,11 +83,14 @@ class HTXReportParser:
             print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
             self._parse_login_1(df, sheet_name)
             self.identifiers.parsed_sheets.append(sheet_name)
+        elif sheet_name.startswith("trade_") and sheet_name.endswith("_1"):
+            df = pd.read_excel(self.file_path, sheet_name=sheet_name, header=0, engine="openpyxl")
+            print(f"  [ARKUSZ] '{sheet_name}' — {len(df.columns)} kolumn, {len(df)} wierszy")
+            self._parse_trade_sheet(df, sheet_name)
+            self.identifiers.parsed_sheets.append(sheet_name)
         else:
-            # Pozostałe arkusze (trade_*, DeviceFP_1, deposit&withdraw...)
-            # Tylko generyczne skanowanie pierwszych 100 wierszy w poszukiwaniu portfeli/ID
-            # NIE ładujemy wszystkich wierszy do pamięci
-            print(f"  [ARKUSZ] '{sheet_name}' — pominięty (tylko register_1, balance_1, login_1 są parsowane)")
+            # Pozostałe arkusze (DeviceFP_1, deposit&withdraw...)
+            print(f"  [ARKUSZ] '{sheet_name}' — pominięty (tylko register_1, balance_1, login_1, trade_*_1 są parsowane)")
             self.identifiers.unknown_sheets.append(sheet_name)
 
     def _detect_columns(self, df: pd.DataFrame, mapping: dict) -> dict:
@@ -126,6 +129,87 @@ class HTXReportParser:
                     self._htx_balances[uid] = []
                 self._htx_balances[uid].append({"currency": str(curr), "balance": str(bal)})
         print(f"  Sparsowano balance_1: {len(df)} wierszy")
+
+    def _parse_trade_sheet(self, df: pd.DataFrame, sheet_name: str):
+        """Parsuje arkusz trade_*_1 — transakcje handlowe HTX.
+
+        Kolumny: order_type, price, volume, amount, uid, order_id, created_time, symbol, order_side
+        Symbol np. btcusdt -> base=BTC, quote=USDT
+        """
+        col_map = self._detect_columns(df, {
+            "uid": ["uid", "user_id", "userid"],
+            "order_type": ["order_type", "type", "ordertype"],
+            "price": ["price", "cena"],
+            "volume": ["volume", "vol", "ilość", "ilosc"],
+            "amount": ["amount", "wartość", "wartosc", "suma", "value"],
+            "order_id": ["order_id", "orderid", "id_transakcji"],
+            "created_time": ["created_time", "createtime", "time", "date", "timestamp"],
+            "symbol": ["symbol", "pair", "para"],
+            "order_side": ["order_side", "orderside", "side", "strona"],
+        })
+        print(f"  [DEBUG trade] Kolumny w arkuszu: {list(df.columns)}")
+        print(f"  [DEBUG trade] Wykryte kolumny: {list(col_map.keys())}")
+
+        if not col_map:
+            print(f"  [DEBUG trade] NIE wykryto kolumn — pominięto!")
+            return
+
+        # Znane quote currencies (sprawdzamy od najdłuższej do najkrótszej)
+        known_quotes = ["usdt", "usdc", "busd", "husd", "btc", "eth", "trx"]
+
+        for _, row in df.iterrows():
+            uid = self._clean_htx_val(row.iloc[col_map["uid"]]) if "uid" in col_map else None
+            if not uid:
+                continue
+
+            symbol = str(self._clean_htx_val(row.iloc[col_map["symbol"]])) if "symbol" in col_map else ""
+            order_side = str(self._clean_htx_val(row.iloc[col_map["order_side"]])).lower() if "order_side" in col_map else ""
+            order_type = str(self._clean_htx_val(row.iloc[col_map["order_type"]])) if "order_type" in col_map else ""
+            price = str(self._clean_htx_val(row.iloc[col_map["price"]])) if "price" in col_map else ""
+            volume = str(self._clean_htx_val(row.iloc[col_map["volume"]])) if "volume" in col_map else ""
+            amount = str(self._clean_htx_val(row.iloc[col_map["amount"]])) if "amount" in col_map else ""
+            order_id = str(self._clean_htx_val(row.iloc[col_map["order_id"]])) if "order_id" in col_map else ""
+            created_time = str(self._clean_htx_val(row.iloc[col_map["created_time"]])) if "created_time" in col_map else ""
+
+            # Wylicz base/quote z symbolu
+            base_curr = symbol.upper() if symbol else ""
+            quote_curr = ""
+            sym_lower = symbol.lower() if symbol else ""
+            for q in sorted(known_quotes, key=len, reverse=True):
+                if sym_lower.endswith(q):
+                    base_curr = sym_lower[:-len(q)].upper()
+                    quote_curr = q.upper()
+                    break
+
+            if uid not in self.identifiers.htx_trade_transactions:
+                self.identifiers.htx_trade_transactions[uid] = []
+
+            self.identifiers.htx_trade_transactions[uid].append({
+                "order_type": order_type,
+                "price": price,
+                "volume": volume,
+                "amount": amount,
+                "order_id": order_id,
+                "created_time": created_time,
+                "symbol": symbol.upper(),
+                "order_side": order_side,
+                "base_currency": base_curr,
+                "quote_currency": quote_curr,
+                "source_sheet": sheet_name,
+            })
+
+            # Aktualizuj time_ranges
+            if created_time:
+                if sheet_name not in self.identifiers.time_ranges:
+                    self.identifiers.time_ranges[sheet_name] = {"from": created_time, "to": created_time}
+                else:
+                    if created_time < self.identifiers.time_ranges[sheet_name]["from"]:
+                        self.identifiers.time_ranges[sheet_name]["from"] = created_time
+                    if created_time > self.identifiers.time_ranges[sheet_name]["to"]:
+                        self.identifiers.time_ranges[sheet_name]["to"] = created_time
+
+        total = sum(len(v) for v in self.identifiers.htx_trade_transactions.values())
+        print(f"  Sparsowano {sheet_name}: {len(df)} wierszy, {total} transakcji handlowych")
 
     def _parse_login_1(self, df: pd.DataFrame, sheet_name: str):
         """Parsuje arkusz login_1 — logowania per UID.
